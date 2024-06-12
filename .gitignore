@@ -1,0 +1,17 @@
+__pycache__/
+*/__pycache__/
+data/*
+logs/*
+*/logs/
+*.py[co]
+*.json
+.coverage
+venv/
+bin/
+
+secrets/*
+delete/*
+local_config.py
+
+# Mac specific files
+.DS_Store

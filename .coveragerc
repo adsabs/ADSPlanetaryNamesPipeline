@@ -1,0 +1,4 @@
+
+[run]
+source = adsplanetnamepipe
+omit = adsplanetnamepipe/test*
