@@ -135,19 +135,26 @@ class FeatureName(Base):
     feature_type_entity = Column(String(32), primary_key=True)
     # the target entity, serving as part of the primary key
     target_entity = Column(String(32), primary_key=True)
+    # a unique identifier for the feature name, required
+    entity_id = Column(Integer, nullable=False)
+    # the year the feature was approved, only the year is stored, required
+    approval_year = Column(String(4), nullable=False)
 
-    def __init__(self, entity: str, target_entity: str, feature_type_entity: str):
+    def __init__(self, entity: str, target_entity: str, feature_type_entity: str, entity_id: int, approval_year: str):
         """
         initialize a new FeatureName instance
 
         :param entity: the name of the feature
         :param target_entity: the name of the target entity associated with this feature name
         :param feature_type_entity: the name of feature type associated with this feature name
+        :param entity_id: unique identifier associated with this feature name
+        :param approval_year: the year the feature name was approved, stored as a four-digit string (e.g., '2000')
         """
         self.entity = entity
         self.target_entity = target_entity
         self.feature_type_entity = feature_type_entity
-
+        self.entity_id = entity_id
+        self.approval_year = approval_year
 
 class FeatureNameContext(Base):
     """
