@@ -1,6 +1,11 @@
 name: GitHub Actions CI 
 
-on: [pull_request]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
 env:
   PGDATABASE: test
   PGPASSWORD: postgres
