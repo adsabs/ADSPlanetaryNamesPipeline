@@ -1,6 +1,7 @@
 import sys
 import os
-from typing import List, Tuple
+import csv
+from typing import List, Tuple, Dict
 from datetime import datetime, timedelta
 
 from adsputils import setup_logging, load_config
@@ -46,11 +47,11 @@ def verify_args(args: argparse) -> Tuple[str, str, List[str]]:
 
 def get_date(days: int) -> datetime:
     """
-    Calculates a target date based on the number of days provided.
-    If days is 0, it returns the earliest possible datetime (datetime.min).
+    calculates a target date based on the number of days provided
+    if days is 0, it returns the earliest possible datetime (datetime.min).
 
-    :param days: int, The number of days to subtract from the current date. Can be 0 or a positive integer.
-    :return: datetime, A datetime object representing either the target date or the earliest possible datetime if days is 0.
+    :param days: int, the number of days to subtract from the current date. Can be 0 or a positive integer.
+    :return: datetime, a datetime object representing either the target date or the earliest possible datetime if days is 0.
     """
     if days == 0:
         return datetime.min
@@ -58,6 +59,31 @@ def get_date(days: int) -> datetime:
     target_date = datetime.now().date() - timedelta(days=days)
     target_datetime = datetime.combine(target_date, datetime.now().time())
     return target_datetime
+
+
+def read_updated_usgs_gazetteer(csv_file_path: str) -> List[Dict[str, str]]:
+    """
+    reads the updated usgs entities
+    containing five columns: Feature_ID,Clean_Feature_Name,Target,Feature_Type,Approval_Date,Approval_Status
+
+    :param csv_file_path: path to the CSV file.
+    :return: list of dictionaries, each containing data from one row.
+    """
+    data = []
+    try:
+        with open(csv_file_path, newline='', encoding='utf-8-sig') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                if row['Approval_Status'].lower() == 'approved':
+                    # extract year from `Approval_Date` and use only the first part of `Feature_Type` before comma
+                    row['Approval_Date'] = row['Approval_Date'].split('-')[-1] if '-' in row['Approval_Date'] else row['Approval_Date']
+                    row['Feature_Type'], row['Feature_Type_Plural'] = [x.strip() for x in (row['Feature_Type'].split(',') + [''])[:2]]
+                    data.append(row)
+    except FileNotFoundError:
+        logger.error(f"File not found: {csv_file_path}. Please check the path and try again.")
+    except Exception as e:
+        logger.error(f"An error occurred while reading the file: {e}")
+    return data
 
 # python run.py -t Mars -f "Albedo Feature" -a collect
 # python run.py -t Mars -n Amenthes -a collect
@@ -68,6 +94,7 @@ def get_date(days: int) -> datetime:
 # python run.py -t Mars -n Amenthes -a retrieve_identified_entities -c 0.75
 # TODO: add a command to run all the feature types for all celestial bodies for collect step
 # TODO: add a command to run all the feature names since d days ago
+# python run.py -a update_database_with_usgs_entities -u updated_usgs_terms.csv
 
 # Main entry point of the script.
 # Sets up argument parsing, processes the arguments, and executes the appropriate action based on the provided command-line arguments.
@@ -81,6 +108,7 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--confidence_score', help='(optional) only applicable for action=retrieve_identified_entities, if specified only the identified entities with confidence score >= this score are returned.')
     parser.add_argument('-d', '--days', help='(optional) only applicable for action=retrieve_identified_entities, if specified only the entities identified in the past many days are returned.')
     parser.add_argument('-s', '--timestamp', help='(Optional) Applicable only when action=identify is specified. If provided, it should be in the format YYYY-MM-DD. Solr records from this date (inclusive) are considered for processing. Records with full-text modifications on or after this date will also be included, even if their original date is earlier.')
+    parser.add_argument('-u', '--usgs_update', help='usgs updated list in csv format with five columns: Feature_ID,Clean_Feature_Name,Target,Feature_Type,Approval_Date,Approval_Status.')
     args = parser.parse_args()
     if args.action:
         action_type = map_input_param_to_action_type(args.action)
@@ -116,6 +144,25 @@ if __name__ == '__main__':
             # TODO: find out how the user wants this results outputted
             if results:
                 logger.info(f"Total entities fetched: {len(results)}")
+    # the action with only one required parameter: the csv file extracted info from usgs recently
+    elif action_type == PLANETARYNAMES_PIPELINE_ACTION.update_database_with_usgs_entities:
+        if args.usgs_update:
+            data = read_updated_usgs_gazetteer(args.usgs_update)
+            if data:
+                feature_ids = {int(row['Feature_ID']) for row in data}
+                entity_ids = set(app.get_feature_ids())
+                new_feature_ids = list(feature_ids - entity_ids)
+                # extract entries for the new_feature_ids and send to be checked for any new target or feature_type
+                # to be inserted to the database
+                new_entries = [row for row in data if int(row['Feature_ID']) in new_feature_ids]
+                tables_updated = app.add_new_usgs_entities(new_entries)
+                if tables_updated:
+                    logger.info("New targets and feature types have been successfully updated.")
+                else:
+                    logger.error("Failed to update new targets and feature types.")
+        else:
+            logger.error("CSV file for USGS data update is missing. Please provide the CSV file using the '--usgs_update' argument.")
+            sys.exit(1)
     else:
         if args.target:
             current_target, current_feature_type, current_feature_names = verify_args(args)

@@ -9,7 +9,7 @@ from datetime import datetime
 from adsputils import ADSCelery
 
 from adsplanetnamepipe.models import FeatureName, FeatureType, AmbiguousFeatureName, MultiTokenFeatureName, \
-    NamedEntityLabel, Target, KnowledgeBase, KnowledgeBaseHistory, NamedEntityHistory, NamedEntity
+    NamedEntityLabel, Target, KnowledgeBase, KnowledgeBaseHistory, NamedEntityHistory, NamedEntity, USGSNomenclature
 
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -142,7 +142,7 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
         """
         return all the target entities
 
-        :return: a list of all target entities
+        :return: list of all target entities
         """
         with self.session_scope() as session:
             rows = session.query(Target).all()
@@ -153,6 +153,39 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                 return target_entities
             else:
                 self.logger.error("Unable to fetch the target records.")
+        return []
+
+    def get_feature_type_entities(self, target_entity: str) -> List[str]:
+        """
+        return all feature types for a given target
+
+        :param target_entity: The target entity to filter by.
+        :return: List of all feature_type entities for the target.
+        """
+        with self.session_scope() as session:
+            rows = session.query(FeatureType).filter(FeatureType.target_entity == target_entity).all()
+            if rows:
+                # Using list comprehension for simplicity
+                feature_type_entities = [row.entity for row in rows]
+                return feature_type_entities
+            else:
+                self.logger.error(f"Unable to fetch feature type entity records for {target_entity}.")
+        return []
+
+    def get_feature_ids(self) -> List[int]:
+        """
+        return all the entity IDs from the feature_name table
+
+        :return: A list of entity IDs
+        """
+        with self.session_scope() as session:
+            rows = session.query(FeatureName).order_by(FeatureName.entity_id.asc()).all()
+
+            if rows:
+                entity_ids = [row.entity_id for row in rows]
+                return entity_ids
+            else:
+                self.logger.error(f"No entity IDs are found!")
         return []
 
     def insert_knowledge_base_records(self, knowledge_base_list: List[Tuple[KnowledgeBaseHistory, List[KnowledgeBase]]]) -> bool:
@@ -443,3 +476,152 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                 self.logger.error(f'Unable to fetch `NamedEntity` data for {feature_name_entity}/{feature_type_entity}/{target_entity}/{confidence_score}.')
 
         return result
+
+    def insert_target_entities(self, target_list: List[str]) -> bool:
+        """
+        insert new target entities into the database.
+
+        :param target_list: list of new target entities to insert
+        :return: True if insertion is successful, False otherwise
+        """
+        with self.session_scope() as session:
+            try:
+                # Create Target objects for each new target
+                new_targets = [Target(entity=target) for target in target_list]
+                session.bulk_save_objects(new_targets)
+                session.commit()
+                self.logger.debug("Added new target entities successfully.")
+                return True
+            except SQLAlchemyError as e:
+                session.rollback()
+                self.logger.error(f"Error occurred while inserting new target entities: {str(e)}")
+                return False
+
+    def insert_feature_types(self, feature_type_list: List[dict]) -> bool:
+        """
+        insert new feature types for specific targets into the database
+
+        :param feature_type_list: list of dictionaries, each containing `entity`, `target_entity`, and `plural_entity`
+        :return: True if insertion is successful, False otherwise
+        """
+        with self.session_scope() as session:
+            try:
+                new_feature_types = [
+                    FeatureType(
+                        entity=feature_type['Feature_Type'],
+                        target_entity=feature_type['Target'],
+                        plural_entity=feature_type['Feature_Type_Plural'])
+                    for feature_type in feature_type_list
+                ]
+                session.bulk_save_objects(new_feature_types)
+                session.commit()
+                self.logger.debug("Added new feature types successfully.")
+                return True
+            except SQLAlchemyError as e:
+                session.rollback()
+                self.logger.error(f"Error occurred while inserting new feature types: {str(e)}")
+                return False
+
+    def insert_new_usgs_nomenclature_entities(self, feature_name_list: List[str]) -> bool:
+        """
+        checks for the presence of specified entities in the `usgs_nomenclature` table
+        only add any new feature_names
+
+        :param feature_name_list: list of future names to check and add if missing
+        :return: True if insertion is successful or if all entities already exist, False otherwise
+        """
+        with self.session_scope() as session:
+            try:
+                # query only for entities that need to be checked
+                existing_entities = {row.entity for row in session.query(USGSNomenclature.entity)
+                    .filter(USGSNomenclature.entity.in_(feature_name_list)).all()}
+
+                # determine which entities are missing and prepare them for insertion
+                new_feature_names = [
+                    USGSNomenclature(entity=feature_name) for feature_name in feature_name_list if feature_name not in existing_entities
+                ]
+                if new_feature_names:
+                    session.bulk_save_objects(new_feature_names)
+                    session.commit()
+                    self.logger.debug(f"Inserted {len(new_feature_names)} new feature names into `usgs_nomenclature`.")
+                else:
+                    self.logger.debug("No new feature name entities needed to be added to `usgs_nomenclature`.")
+                return True
+            except Exception as e:
+                session.rollback()
+                self.logger.error(f"Error inserting usgs_nomenclature entities: {str(e)}")
+                return False
+
+    def insert_feature_name_records(self, feature_name_list: List[dict]) -> bool:
+        """
+        Inserts feature name records into the `feature_name` table.
+
+        :param feature_name_list: list of dictionaries, each representing a feature name entry
+        :return: True if insertion is successful, False otherwise
+        """
+        with self.session_scope() as session:
+            try:
+                new_feature_names = [
+                    FeatureName(
+                        entity=feature_name['Clean_Feature_Name'],
+                        target_entity=feature_name['Target'],
+                        feature_type_entity=feature_name['Feature_Type'],
+                        entity_id=feature_name['Feature_ID'],
+                        approval_year=feature_name['Approval_Date']
+                    )
+                    for feature_name in feature_name_list
+                ]
+                session.bulk_save_objects(new_feature_names)
+                session.commit()
+                self.logger.debug("Feature name records inserted successfully.")
+                return True
+            except SQLAlchemyError as e:
+                session.rollback()
+                self.logger.error(f"Error inserting feature name records: {str(e)}")
+                return False
+
+    def add_new_usgs_entities(self, data: List[dict]) -> bool:
+        """
+        updates the database with new target and feature type entries if they don't already exist
+
+        :param data: list of dictionaries containing new feature_name entries from user input, targets and feature types might be new, might be not
+        :return: True if insertion to both tables are successful, False otherwise
+        """
+        # extract unique targets and feature types from the new data
+        new_targets = {entry['Target'] for entry in data}
+        new_feature_types = {(entry['Feature_Type'], entry['Target'], entry['Feature_Type_Plural']) for entry in data}
+
+        # update targets if there are any new entities
+        existing_targets = set(self.get_target_entities())
+        targets_to_add = list(new_targets - existing_targets)
+        result_targets_added = self.insert_target_entities(targets_to_add) if targets_to_add else True
+
+        # add new feature_names to usgs_nomenclature_table if not already there
+        # note that usgs_nomenclature_table hold all unique feature_names while
+        # feature_type_table holds feature_name associated with a target
+        # hence it can identify ambiguous feature_names
+        new_feature_names = {entry['Clean_Feature_Name'] for entry in data}
+        result_usgs_nomenclature_added = self.insert_new_usgs_nomenclature_entities(new_feature_names) if new_feature_names else True
+
+        if result_targets_added and result_usgs_nomenclature_added:
+            # accumulate all feature types for each target
+            unique_targets = {entry[1] for entry in new_feature_types}
+            existing_feature_types_by_target = {target: set(self.get_feature_type_entities(target)) for target in unique_targets}
+
+            # prepare feature types to add
+            feature_types_to_add = []
+            for feature_type, target_entity, plural_entity in new_feature_types:
+                if feature_type not in existing_feature_types_by_target.get(target_entity, set()):
+                    feature_types_to_add.append({
+                        'Feature_Type': feature_type,
+                        'Target': target_entity,
+                        'Feature_Type_Plural': plural_entity
+                    })
+            result_feature_type_added = self.insert_feature_types(feature_types_to_add) if feature_types_to_add else True
+
+            if result_feature_type_added:
+                result_feature_names_added = self.insert_feature_name_records(data)
+
+            return result_targets_added and result_usgs_nomenclature_added and result_feature_type_added and result_feature_names_added
+
+        return False

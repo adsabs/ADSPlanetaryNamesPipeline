@@ -23,6 +23,7 @@ class PLANETARYNAMES_PIPELINE_ACTION(Enum):
         add a keyword manually if the excerpt contains that keyword (add_keyword_to_knowledge_graph)
         remove a keyword if it exists (remove_keyword_from_knowledge_graph)
         retrieve all the identified entities (retrieve_identified_entities)
+        update database with any new approved target/feature type/feature name (update_database_usgs_entities)
     also included is invalid when the action is none of the above mentioned
     """
 
@@ -34,6 +35,7 @@ class PLANETARYNAMES_PIPELINE_ACTION(Enum):
     add_keyword_to_knowledge_graph = 'add_keyword_to_knowledge_graph'
     remove_keyword_from_knowledge_graph = 'remove_keyword_from_knowledge_graph'
     retrieve_identified_entities = 'retrieve_identified_entities'
+    update_database_with_usgs_entities = 'update_database_with_usgs_entities'
     invalid = 'invalid'
 
 

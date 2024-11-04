@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from adsplanetnamepipe import app
 from adsplanetnamepipe.models import Base, FeatureType, KnowledgeBaseHistory, KnowledgeBase, \
-    NamedEntity, NamedEntityHistory
+    NamedEntity, NamedEntityHistory, USGSNomenclature
 from adsplanetnamepipe.tests.unittests.stubdata.dbdata import collection_records, usgs_nomenclature_records, \
     target_records, feature_type_records, feature_name_records, \
     feature_name_context_records, ambiguous_feature_name_records, multi_token_feature_name_records, \
@@ -470,6 +470,64 @@ class TesADSPlanetaryNamesPipelineCelery(unittest.TestCase):
         results = self.app.get_named_entity_bibcodes(date='2024-06-06')
         self.assertEqual(len(results), 2)
 
+    def test_get_feature_ids(self):
+        """ Test the get_feature_ids method """
+
+        results = self.app.get_feature_ids()
+        self.assertEqual(len(results), 2090)
+        self.assertEqual(results[0], 11)
+        self.assertEqual(results[2089], 16036)
+
+    def test_add_new_usgs_entities(self):
+        """ add_new_usgs_entities """
+
+        # define dummy data with new feature names, some new and some existing targets and feature types
+        data = [
+            # add a new feature name for Moon Crater and Mars Albedo Feature
+            {'Feature_ID': '99001', 'Clean_Feature_Name': 'new_feature_name_1', 'Target': 'Moon', 'Feature_Type': 'Crater',
+             'Approval_Date': '2024', 'Approval_Status': 'Approved', 'Feature_Type_Plural': 'Craters'},
+            {'Feature_ID': '99002', 'Clean_Feature_Name': 'new_feature_name_2', 'Target': 'Mars',
+             'Feature_Type': 'Albedo Feature', 'Approval_Date': '2024', 'Approval_Status': 'Approved',
+             'Feature_Type_Plural': ''},
+            # add a new feature name for a new target and new feature type
+            # one feature type has plural and the other does not
+            {'Feature_ID': '99003', 'Clean_Feature_Name': 'new_feature_name_3', 'Target': 'new_target_1',
+             'Feature_Type': 'new_feature_type_1', 'Approval_Date': '2024', 'Approval_Status': 'Approved',
+             'Feature_Type_Plural': 'new_feature_type_1_plural'},
+            {'Feature_ID': '99004', 'Clean_Feature_Name': 'new_feature_name_4', 'Target': 'new_target_2',
+             'Feature_Type': 'new_feature_type_2', 'Approval_Date': '2024', 'Approval_Status': 'Approved',
+             'Feature_Type_Plural': ''},
+            # make a feature name ambiguous by assigning an existing feature name to another target
+            # FeatureName(entity='Rayleigh', target_entity='Moon', feature_type_entity='Crater', entity_id=4966, approval_year='1964')
+            {'Feature_ID': '99005', 'Clean_Feature_Name': 'Rayleigh', 'Target': 'new_target_2',
+             'Feature_Type': 'Crater', 'Approval_Date': '2024', 'Approval_Status': 'Approved',
+             'Feature_Type_Plural': 'Craters'}
+        ]
+
+        # call the method to add new USGS entities
+        insertion_successful = self.app.add_new_usgs_entities(data)
+
+        # check that the insertion was successful
+        self.assertTrue(insertion_successful)
+
+        # fetch the inserted targets to verify
+        inserted_targets = set(self.app.get_target_entities())
+        self.assertIn('new_target_1', inserted_targets)
+        self.assertIn('new_target_2', inserted_targets)
+
+        # fetch the inserted feature name
+        self.assertEqual(self.app.get_feature_type_entity('Moon', 'new_feature_name_1'), 'Crater')
+        self.assertEqual(self.app.get_feature_type_entity('Mars', 'new_feature_name_2'), 'Albedo Feature')
+        self.assertEqual(self.app.get_feature_type_entity('new_target_1', 'new_feature_name_3'), 'new_feature_type_1')
+        self.assertEqual(self.app.get_feature_type_entity('new_target_2', 'new_feature_name_4'), 'new_feature_type_2')
+        self.assertEqual(self.app.get_feature_type_entity('new_target_2', 'Rayleigh'), 'Crater')
+
+        # verify the new feature names ids are inserted
+        feature_ids = self.app.get_feature_ids()
+        new_feature_ids = [99001, 99002, 99003, 99004, 99005]
+        for feature_id in new_feature_ids:
+            self.assertIn(feature_id, feature_ids)
+
 
 class TestADSPlanetaryNamesPipelineCeleryNoStubdata(unittest.TestCase):
 
@@ -684,6 +742,124 @@ class TestADSPlanetaryNamesPipelineCeleryNoStubdata(unittest.TestCase):
 
         results = self.app.get_named_entity_bibcodes()
         self.assertEqual(results, [])
+
+    def test_get_feature_ids_when_empty_table(self):
+        """ test the get_feature_ids method when no records """
+
+        result = self.app.get_feature_ids()
+        self.assertEqual(result, [])
+
+
+    def test_insert_target_entities_exception(self):
+        """ test insert_target_entities method when there is an exception """
+
+        target_list = ["target_1", "target_2"]
+
+        with patch.object(self.app, "session_scope") as mock_session_scope:
+            mock_session = mock_session_scope.return_value.__enter__.return_value
+            mock_session.bulk_save_objects.side_effect = SQLAlchemyError("Mocked SQLAlchemyError")
+
+            with patch.object(self.app.logger, 'error') as mock_error:
+                result = self.app.insert_target_entities(target_list)
+
+                self.assertFalse(result)
+                mock_session.rollback.assert_called_once()
+                mock_error.assert_called_once_with("Error occurred while inserting new target entities: Mocked SQLAlchemyError")
+
+    def test_insert_feature_types_exception(self):
+        """ test insert_feature_types method when there is an exception """
+
+        feature_type_list = [
+            {'Feature_Type': 'feature_type_1', 'Target': 'target_1', 'Feature_Type_Plural': 'feature_type_1_plural'}
+        ]
+
+        with patch.object(self.app, "session_scope") as mock_session_scope:
+            mock_session = mock_session_scope.return_value.__enter__.return_value
+            mock_session.bulk_save_objects.side_effect = SQLAlchemyError("Mocked SQLAlchemyError")
+
+            with patch.object(self.app.logger, 'error') as mock_error:
+                result = self.app.insert_feature_types(feature_type_list)
+
+                self.assertFalse(result)
+                mock_session.rollback.assert_called_once()
+                mock_error.assert_called_once_with("Error occurred while inserting new feature types: Mocked SQLAlchemyError")
+
+    def test_insert_new_usgs_nomenclature_entities_exception(self):
+        """ test insert_new_usgs_nomenclature_entities method when there is an exception """
+
+        feature_name_list = ["feature_name_1", "feature_name_2"]
+
+        with patch.object(self.app, "session_scope") as mock_session_scope:
+            mock_session = mock_session_scope.return_value.__enter__.return_value
+            mock_session.bulk_save_objects.side_effect = SQLAlchemyError("Mocked SQLAlchemyError")
+
+            with patch.object(self.app.logger, 'error') as mock_error:
+                result = self.app.insert_new_usgs_nomenclature_entities(feature_name_list)
+
+                self.assertFalse(result)
+                mock_session.rollback.assert_called_once()
+                mock_error.assert_called_once_with("Error inserting usgs_nomenclature entities: Mocked SQLAlchemyError")
+
+    def test_insert_feature_name_records_exception(self):
+        """ test insert_feature_name_records method when there is an exception """
+
+        feature_name_list = [
+            {'Clean_Feature_Name': 'new_feature_name_1', 'Target': 'target_1', 'Feature_Type': 'feature_type_1', 'Feature_ID': '99001', 'Approval_Date': '2024'}
+        ]
+
+        with patch.object(self.app, "session_scope") as mock_session_scope:
+            mock_session = mock_session_scope.return_value.__enter__.return_value
+            mock_session.bulk_save_objects.side_effect = SQLAlchemyError("Mocked SQLAlchemyError")
+
+            with patch.object(self.app.logger, 'error') as mock_error:
+                result = self.app.insert_feature_name_records(feature_name_list)
+
+                self.assertFalse(result)
+                mock_session.rollback.assert_called_once()
+                mock_error.assert_called_once_with("Error inserting feature name records: Mocked SQLAlchemyError")
+
+    def test_no_new_feature_name_entities_needed(self):
+        """ test insert_new_usgs_nomenclature_entities when no new entries are needed """
+
+        feature_name_list = ["existing_feature_name_1", "existing_feature_name_2"]
+
+        with patch.object(self.app, "session_scope") as mock_session_scope:
+            mock_session = mock_session_scope.return_value.__enter__.return_value
+            mock_session.query.return_value.filter.return_value.all.return_value = [
+                USGSNomenclature(entity="existing_feature_name_1"),
+                USGSNomenclature(entity="existing_feature_name_2")
+            ]
+
+            with patch.object(self.app.logger, 'debug') as mock_debug:
+                result = self.app.insert_new_usgs_nomenclature_entities(feature_name_list)
+
+                self.assertTrue(result)
+                mock_debug.assert_called_once_with("No new feature name entities needed to be added to `usgs_nomenclature`.")
+
+    @patch.object(app.ADSPlanetaryNamesPipelineCelery, 'insert_target_entities', return_value=True)
+    @patch.object(app.ADSPlanetaryNamesPipelineCelery, 'insert_new_usgs_nomenclature_entities', return_value=False)
+    @patch.object(app.ADSPlanetaryNamesPipelineCelery, 'insert_feature_types')
+    @patch.object(app.ADSPlanetaryNamesPipelineCelery, 'insert_feature_name_records')
+    def test_add_new_usgs_entities_returns_false(self, mock_insert_feature_name_records, mock_insert_feature_types,
+                                                 mock_insert_usgs_nomenclature_entities, mock_insert_target_entities):
+        """ test add_new_usgs_entities method when usgs_nomenclature insertion fails, causing the function to return False """
+
+        data = [
+            {'Clean_Feature_Name': 'new_feature_name_1', 'Target': 'target_1', 'Feature_Type': 'feature_type_1', 'Feature_ID': '99001', 'Approval_Date': '2024', 'Feature_Type_Plural': 'feature_type_1_plural'}
+        ]
+
+        # call the method to add new USGS entities
+        insertion_successful = self.app.add_new_usgs_entities(data)
+
+        # check that the insertion was unsuccessful
+        self.assertFalse(insertion_successful)
+
+        # confirm that the appropriate insert methods were called
+        mock_insert_target_entities.assert_called_once()
+        mock_insert_usgs_nomenclature_entities.assert_called_once_with({'new_feature_name_1'})
+        mock_insert_feature_types.assert_not_called()
+        mock_insert_feature_name_records.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
