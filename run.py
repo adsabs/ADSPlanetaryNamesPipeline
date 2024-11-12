@@ -1,6 +1,7 @@
 import sys
 import os
 import csv
+import re
 from typing import List, Tuple, Dict
 from datetime import datetime, timedelta
 
@@ -69,15 +70,27 @@ def read_updated_usgs_gazetteer(csv_file_path: str) -> List[Dict[str, str]]:
     :param csv_file_path: path to the CSV file.
     :return: list of dictionaries, each containing data from one row.
     """
+    year_pattern = re.compile(r'\b\d{4}\b')
     data = []
     try:
         with open(csv_file_path, newline='', encoding='utf-8-sig') as csvfile:
             reader = csv.DictReader(csvfile)
+            # there are lots of white space in the header line coming from the Planetary Name website
+            # Feature ID	Clean          Feature Name	Target	Feature Type	Approval          Status	Approval Date
+            # skip their header
+            old_header = next(reader)
+            # to use these as column headers
+            new_header = ['entity_id', 'feature_name', 'target', 'feature_type', 'approval_status', 'approval_date']
             for row in reader:
-                if row['Approval_Status'].lower() == 'approved':
-                    # extract year from `Approval_Date` and use only the first part of `Feature_Type` before comma
-                    row['Approval_Date'] = row['Approval_Date'].split('-')[-1] if '-' in row['Approval_Date'] else row['Approval_Date']
-                    row['Feature_Type'], row['Feature_Type_Plural'] = [x.strip() for x in (row['Feature_Type'].split(',') + [''])[:2]]
+                # transform keys first
+                row = {new_key: row[old_key] for new_key, old_key in zip(new_header, old_header)}
+                # now process the row
+                if row['approval_status'].lower() == 'approved':
+                    # extract year from `approval_date`
+                    match = year_pattern.search(row['approval_date'])
+                    row['approval_date'] = match.group(0) if match else row['approval_date']
+                    # split `feature_type` to have separate singular and plural (if any)
+                    row['feature_type'], row['feature_type_plural'] = [x.strip() for x in (row['feature_type'].split(',') + [''])[:2]]
                     data.append(row)
     except FileNotFoundError:
         logger.error(f"File not found: {csv_file_path}. Please check the path and try again.")
@@ -109,6 +122,7 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--days', help='(optional) only applicable for action=retrieve_identified_entities, if specified only the entities identified in the past many days are returned.')
     parser.add_argument('-s', '--timestamp', help='(Optional) Applicable only when action=identify is specified. If provided, it should be in the format YYYY-MM-DD. Solr records from this date (inclusive) are considered for processing. Records with full-text modifications on or after this date will also be included, even if their original date is earlier.')
     parser.add_argument('-u', '--usgs_update', help='usgs updated list in csv format with five columns: Feature_ID,Clean_Feature_Name,Target,Feature_Type,Approval_Date,Approval_Status.')
+
     args = parser.parse_args()
     if args.action:
         action_type = map_input_param_to_action_type(args.action)
@@ -149,17 +163,17 @@ if __name__ == '__main__':
         if args.usgs_update:
             data = read_updated_usgs_gazetteer(args.usgs_update)
             if data:
-                feature_ids = {int(row['Feature_ID']) for row in data}
-                entity_ids = set(app.get_feature_ids())
-                new_feature_ids = list(feature_ids - entity_ids)
-                # extract entries for the new_feature_ids and send to be checked for any new target or feature_type
+                entity_id = {int(row['entity_id']) for row in data}
+                entity_ids = set(app.get_entity_ids())
+                new_entity_id = list(entity_id - entity_ids)
+                # extract entries for the new_entity_id and send to be checked for any new target or feature_type
                 # to be inserted to the database
-                new_entries = [row for row in data if int(row['Feature_ID']) in new_feature_ids]
+                new_entries = [row for row in data if int(row['entity_id']) in new_entity_id]
                 tables_updated = app.add_new_usgs_entities(new_entries)
                 if tables_updated:
-                    logger.info("New targets and feature types have been successfully updated.")
+                    logger.info("Imported USGS Gazetteer successfully.")
                 else:
-                    logger.error("Failed to update new targets and feature types.")
+                    logger.error("Failed to imported USGS Gazetteer.")
         else:
             logger.error("CSV file for USGS data update is missing. Please provide the CSV file using the '--usgs_update' argument.")
             sys.exit(1)

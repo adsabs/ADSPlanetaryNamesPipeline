@@ -5,16 +5,18 @@ in order to initialize the database and get a working configuration.
 
 from typing import List, Tuple
 from datetime import datetime
+import re
 
 from adsputils import ADSCelery
 
 from adsplanetnamepipe.models import FeatureName, FeatureType, AmbiguousFeatureName, MultiTokenFeatureName, \
-    NamedEntityLabel, Target, KnowledgeBase, KnowledgeBaseHistory, NamedEntityHistory, NamedEntity, USGSNomenclature
+    NamedEntityLabel, Target, KnowledgeBase, KnowledgeBaseHistory, NamedEntityHistory, NamedEntity, USGSNomenclature, \
+    FeatureNameContext
 
 
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import and_, desc, delete, asc
-from sqlalchemy.sql.expression import func
+from sqlalchemy import and_, or_, desc, delete, asc
+from sqlalchemy.sql import func, select
 
 
 class ADSPlanetaryNamesPipelineCelery(ADSCelery):
@@ -169,10 +171,10 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                 feature_type_entities = [row.entity for row in rows]
                 return feature_type_entities
             else:
-                self.logger.error(f"Unable to fetch feature type entity records for {target_entity}.")
+                self.logger.error(f"Unable to fetch feature type entity for target {target_entity}.")
         return []
 
-    def get_feature_ids(self) -> List[int]:
+    def get_entity_ids(self) -> List[int]:
         """
         return all the entity IDs from the feature_name table
 
@@ -486,7 +488,7 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
         """
         with self.session_scope() as session:
             try:
-                # Create Target objects for each new target
+                # create Target objects for each new entity
                 new_targets = [Target(entity=target) for target in target_list]
                 session.bulk_save_objects(new_targets)
                 session.commit()
@@ -497,7 +499,7 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                 self.logger.error(f"Error occurred while inserting new target entities: {str(e)}")
                 return False
 
-    def insert_feature_types(self, feature_type_list: List[dict]) -> bool:
+    def insert_feature_type_records(self, feature_type_list: List[dict]) -> bool:
         """
         insert new feature types for specific targets into the database
 
@@ -506,11 +508,12 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
         """
         with self.session_scope() as session:
             try:
+                # create FeatureType objects for each new entity
                 new_feature_types = [
                     FeatureType(
-                        entity=feature_type['Feature_Type'],
-                        target_entity=feature_type['Target'],
-                        plural_entity=feature_type['Feature_Type_Plural'])
+                        entity=feature_type['feature_type'],
+                        target_entity=feature_type['target'],
+                        plural_entity=feature_type['feature_type_plural'])
                     for feature_type in feature_type_list
                 ]
                 session.bulk_save_objects(new_feature_types)
@@ -536,10 +539,8 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                 existing_entities = {row.entity for row in session.query(USGSNomenclature.entity)
                     .filter(USGSNomenclature.entity.in_(feature_name_list)).all()}
 
-                # determine which entities are missing and prepare them for insertion
-                new_feature_names = [
-                    USGSNomenclature(entity=feature_name) for feature_name in feature_name_list if feature_name not in existing_entities
-                ]
+                # determine which entities are missing, then create USGSNomenclature objects for each new entity to be inserted
+                new_feature_names = [USGSNomenclature(entity=feature_name) for feature_name in feature_name_list if feature_name not in existing_entities]
                 if new_feature_names:
                     session.bulk_save_objects(new_feature_names)
                     session.commit()
@@ -561,13 +562,14 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
         """
         with self.session_scope() as session:
             try:
+                # create FeatureName objects for each new entity
                 new_feature_names = [
                     FeatureName(
-                        entity=feature_name['Clean_Feature_Name'],
-                        target_entity=feature_name['Target'],
-                        feature_type_entity=feature_name['Feature_Type'],
-                        entity_id=feature_name['Feature_ID'],
-                        approval_year=feature_name['Approval_Date']
+                        entity=feature_name['feature_name'],
+                        target_entity=feature_name['target'],
+                        feature_type_entity=feature_name['feature_type'],
+                        entity_id=feature_name['entity_id'],
+                        approval_year=feature_name['approval_date']
                     )
                     for feature_name in feature_name_list
                 ]
@@ -580,6 +582,218 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                 self.logger.error(f"Error inserting feature name records: {str(e)}")
                 return False
 
+    def get_usgs_entities(self) -> List[str]:
+        """
+        return all the unique feature name entities
+
+        :return: list of all unique feature names entities
+        """
+        with self.session_scope() as session:
+            rows = session.query(USGSNomenclature).all()
+            if rows:
+                usgs_entities = []
+                for row in rows:
+                    usgs_entities.append(row.entity)
+                return usgs_entities
+            else:
+                self.logger.error("Unable to fetch the USGSNomenclature records.")
+        return []
+
+    def get_new_ambiguous_records(self, feature_name_list: List[str]) -> List[Tuple[str, str]]:
+        """
+        queries the FeatureName table to extract matching USGS entities and their corresponding targets,
+        while excluding entities already present in the AmbiguousFeatureName table using a single query.
+
+        :param matching_usgs_entities: Set of matching USGS entities to be queried.
+        :return: list of feature names and the associated target that because of new additions will become ambiguous
+        """
+        with self.session_scope() as session:
+            # # get matching feature names and targets excluding those in AmbiguousFeatureName already
+            # rows = session.query(FeatureName.entity, FeatureName.target_entity) \
+            #     .filter(FeatureName.entity.in_(feature_name_list)) \
+            #     .filter(~session.query(AmbiguousFeatureName) \
+            #             .filter(and_(AmbiguousFeatureName.entity == FeatureName.entity,
+            #                          AmbiguousFeatureName.context == FeatureName.target_entity)) \
+            #             .exists()) \
+            #     .group_by(FeatureName.entity) \
+            #     .having(func.count(FeatureName.target_entity) > 1) \
+            #     .all()
+
+
+            # query for entities that appear more than once in FeatureName table
+            subquery = session.query(FeatureName.entity) \
+                .filter(FeatureName.entity.in_(feature_name_list)) \
+                .group_by(FeatureName.entity) \
+                .having(func.count(FeatureName.target_entity) > 1) \
+                .subquery()
+            # query to filter out records that already exist in AmbiguousFeatureName
+            rows = session.query(FeatureName.entity, FeatureName.target_entity) \
+                .filter(FeatureName.entity.in_(select(subquery))) \
+                .filter(~session.query(AmbiguousFeatureName) \
+                        .filter(and_(AmbiguousFeatureName.entity == FeatureName.entity, AmbiguousFeatureName.context == FeatureName.target_entity)) \
+                        .exists()) \
+                .all()
+            if rows:
+                new_ambiguous_records = []
+                for row in rows:
+                    new_ambiguous_records.append((row.entity, row.target_entity))
+                return new_ambiguous_records
+            else:
+                self.logger.error("No new ambiguous records found for the provided feature names.")
+        return []
+
+    def get_context_entities(self) -> List[str]:
+        """
+        return all the context entities
+
+        :return: list of all context entities
+        """
+        with self.session_scope() as session:
+            rows = session.query(FeatureNameContext).all()
+            if rows:
+                context_entities = []
+                for row in rows:
+                    context_entities.append(row.context)
+                return context_entities
+            else:
+                self.logger.error("Unable to fetch the FeatureNameContext records.")
+        return []
+
+    def insert_feature_name_contexts(self, context_list: List[str]) -> bool:
+        """
+        inserts new contexts into the FeatureNameContext table if they are not already present
+
+        :param context_list: list of contexts to be added
+        :return: True if insertion is successful or no new contexts need to be added, False otherwise
+        """
+        # fetch existing contexts from the FeatureNameContext table
+        existing_contexts = self.get_context_entities()
+
+        # determine which entities are missing, then create FeatureNameContext objects for each new entity to be inserted
+        new_contexts = [FeatureNameContext(context=context) for context in context_list if context not in existing_contexts]
+
+        if not new_contexts:
+            self.logger.debug("No new contexts need to be added.")
+            return True
+
+        # insert all collected entries
+        with self.session_scope() as session:
+            try:
+                session.bulk_save_objects(new_contexts)
+                session.commit()
+                self.logger.debug(f"Inserted {len(new_contexts)} new contexts into `FeatureNameContext`.")
+                return True
+            except Exception as e:
+                session.rollback()
+                self.logger.error(f"Error inserting into `FeatureNameContext` table: {str(e)}")
+                return False
+
+    def insert_ambiguous_feature_names(self, feature_name_target_list: List[Tuple[str, str]]) -> bool:
+        """
+        updates the AmbiguousFeatureName table for any new associations where feature names may refer
+        to multiple celestial bodies (contexts)
+
+        :param feature_name_target_list: list of tuples where each tuple contains a feature name and its associated target
+        :return: True if insertion is successful or if no new ambiguity is detected, False otherwise.
+        """
+        # fetch unique USGS entities from the database and see if any are in the feature_name_target_list
+        usgs_entities = self.get_usgs_entities()
+        input_feature_names = [feature_name for feature_name, _ in feature_name_target_list]
+        matching_usgs_entities = list(set(input_feature_names).intersection(usgs_entities))
+
+        # list of records exists in the feature name table that because of the update will become ambiguous
+        new_ambiguous_feature_names = [
+            AmbiguousFeatureName(entity=feature_name, context=target)
+            for feature_name, target in self.get_new_ambiguous_records(matching_usgs_entities)
+        ]
+
+        if not new_ambiguous_feature_names:
+            self.logger.debug("No new ambiguous feature names need to be added.")
+            return True
+
+        # get the list of targets and verify that they exist in the FeatureNameContext table
+        target_contexts = {record.context for record in new_ambiguous_feature_names}
+        if not self.insert_feature_name_contexts(list(target_contexts)):
+            self.logger.error("Failed to insert new contexts into `FeatureNameContext` table, preventing updates to ambiguous feature names.")
+            return False
+
+        # insert all collected entries
+        with self.session_scope() as session:
+            try:
+                session.bulk_save_objects(new_ambiguous_feature_names)
+                session.commit()
+                self.logger.debug(f"Inserted {len(new_ambiguous_feature_names)} new ambiguous feature names.")
+                return True
+            except Exception as e:
+                session.rollback()
+                self.logger.error(f"Error inserting into `ambiguous_feature_names` table: {str(e)}")
+                return False
+
+    def get_matched_usgs_entities(self, token_list: List[str]) -> List[str]:
+        """
+        query the USGSNomenclature table for a list of tokens and return the matching entities
+
+        :param token_list: list of tokens to search for in the USGSNomenclature table
+        :return: list of matching entities
+        """
+        with self.session_scope() as session:
+            part_of_rows = session.query(USGSNomenclature.entity).filter(USGSNomenclature.entity.in_(token_list)).all()
+            like_rows = session.query(USGSNomenclature.entity).filter(or_(*[USGSNomenclature.entity.like(f"%{token}%") for token in token_list])).all()
+            rows = part_of_rows + like_rows
+            if rows:
+                return list(set(row.entity for row in rows))
+            else:
+                self.logger.info("No matching USGS entities found for the provided tokens.")
+        return []
+
+    def insert_multi_token_feature_names(self, feature_name_list: List[str]) -> bool:
+            """
+            updates the multi_token_feature_names table if need to for the new feature_name_list entities
+            it first splits the input feature names into tokens,
+            querying the database for these tokens, and then compars the matches
+
+            :param feature_name_list: List of input feature names to be checked for single/multi-token associations.
+            :return: True if insertion is successful or if none of the entities had ambiguity, False otherwise
+            """
+            # split all feature names into individual tokens
+            all_tokens = {token for feature_name in feature_name_list for token in feature_name.split()}
+
+            # query usgs table for any matches that contains these tokens
+            matched_entities = self.get_matched_usgs_entities(all_tokens)
+
+           # collect associations to be added based on matches
+            new_multi_token_entities = []
+            for i, feature_name in enumerate(feature_name_list):
+                for matched_entity in matched_entities:
+                    # Check if matched_entities contain any tokens from feature_name_list and vice versa
+                    if re.search(rf'\b{feature_name}\b', matched_entity) and feature_name != matched_entity:
+                        new_multi_token_entities.append(MultiTokenFeatureName(entity=feature_name, multi_token_entity=matched_entity))
+                    elif re.search(rf'\b{matched_entity}\b', feature_name) and feature_name != matched_entity:
+                        new_multi_token_entities.append(MultiTokenFeatureName(entity=matched_entity, multi_token_entity=feature_name))
+
+                for other_feature_name in feature_name_list[(i+1):]:
+                    # check for associations within the feature_name_list
+                    if re.search(rf'\b{feature_name}\b', other_feature_name):
+                        new_multi_token_entities.append(MultiTokenFeatureName(entity=feature_name, multi_token_entity=other_feature_name))
+                    elif re.search(rf'\b{other_feature_name}\b', feature_name):
+                        new_multi_token_entities.append(MultiTokenFeatureName(entity=other_feature_name, multi_token_entity=feature_name))
+
+            if not new_multi_token_entities:
+                self.logger.debug("No new associations needed in `multi_token_feature_names`.")
+                return True
+
+            # insert all collected entries
+            with self.session_scope() as session:
+                try:
+                    session.bulk_save_objects(new_multi_token_entities)
+                    session.commit()
+                    self.logger.debug(f"Inserted {len(new_multi_token_entities)} new associations into `multi_token_feature_names`.")
+                    return True
+                except Exception as e:
+                    session.rollback()
+                    self.logger.error(f"Error inserting into `multi_token_feature_names` table: {str(e)}")
+                    return False
+
     def add_new_usgs_entities(self, data: List[dict]) -> bool:
         """
         updates the database with new target and feature type entries if they don't already exist
@@ -588,40 +802,46 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
         :return: True if insertion to both tables are successful, False otherwise
         """
         # extract unique targets and feature types from the new data
-        new_targets = {entry['Target'] for entry in data}
-        new_feature_types = {(entry['Feature_Type'], entry['Target'], entry['Feature_Type_Plural']) for entry in data}
+        new_targets = {entry['target'] for entry in data}
+        new_feature_types = [(entry['feature_type'], entry['target'], entry['feature_type_plural']) for entry in data]
 
         # update targets if there are any new entities
-        existing_targets = set(self.get_target_entities())
-        targets_to_add = list(new_targets - existing_targets)
+        existing_targets = self.get_target_entities()
+        targets_to_add = list(new_targets - set(existing_targets))
         result_targets_added = self.insert_target_entities(targets_to_add) if targets_to_add else True
 
-        # add new feature_names to usgs_nomenclature_table if not already there
-        # note that usgs_nomenclature_table hold all unique feature_names while
-        # feature_type_table holds feature_name associated with a target
-        # hence it can identify ambiguous feature_names
-        new_feature_names = {entry['Clean_Feature_Name'] for entry in data}
-        result_usgs_nomenclature_added = self.insert_new_usgs_nomenclature_entities(new_feature_names) if new_feature_names else True
-
-        if result_targets_added and result_usgs_nomenclature_added:
-            # accumulate all feature types for each target
-            unique_targets = {entry[1] for entry in new_feature_types}
-            existing_feature_types_by_target = {target: set(self.get_feature_type_entities(target)) for target in unique_targets}
-
-            # prepare feature types to add
+        if result_targets_added:
+            # determine which feature types are new and need to be added
+            existing_feature_types = {target: set(self.get_feature_type_entities(target)) for target in new_targets}
             feature_types_to_add = []
+            # keep track of unique feature type entries
+            seen_feature_types = set()
             for feature_type, target_entity, plural_entity in new_feature_types:
-                if feature_type not in existing_feature_types_by_target.get(target_entity, set()):
+                # create a tuple representing the unique combination of feature type, target, and plural entity
+                feature_type_tuple = (feature_type, target_entity, plural_entity)
+
+                if feature_type not in existing_feature_types.get(target_entity, set()) and feature_type_tuple not in seen_feature_types:
                     feature_types_to_add.append({
-                        'Feature_Type': feature_type,
-                        'Target': target_entity,
-                        'Feature_Type_Plural': plural_entity
+                        'feature_type': feature_type,
+                        'target': target_entity,
+                        'feature_type_plural': plural_entity
                     })
-            result_feature_type_added = self.insert_feature_types(feature_types_to_add) if feature_types_to_add else True
+                    seen_feature_types.add(feature_type_tuple)
+            result_feature_type_added = self.insert_feature_type_records(feature_types_to_add) if feature_types_to_add else True
 
             if result_feature_type_added:
-                result_feature_names_added = self.insert_feature_name_records(data)
+                # add new feature_names to usgs_nomenclature_table if not already there
+                # note that usgs_nomenclature_table hold all unique feature_names while
+                # feature_type_table holds feature_name associated with a target
+                # hence it can identify ambiguous feature_names
+                new_feature_names = list(set(entry['feature_name'] for entry in data))
+                result_usgs_nomenclature_added = self.insert_new_usgs_nomenclature_entities(new_feature_names) if new_feature_names else True
 
-            return result_targets_added and result_usgs_nomenclature_added and result_feature_type_added and result_feature_names_added
+
+                if result_usgs_nomenclature_added:
+                    if self.insert_feature_name_records(data):
+                        new_feature_name_and_target = [(entry['feature_name'], entry['target']) for entry in data]
+                        if self.insert_ambiguous_feature_names(new_feature_name_and_target):
+                            return self.insert_multi_token_feature_names(new_feature_names)
 
         return False
