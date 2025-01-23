@@ -422,17 +422,17 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                 return False
 
     def get_named_entity_bibcodes(self, feature_name_entity: str = None, feature_type_entity: str = None,
-                                        target_entity: str = None, confidence_score: float = None, date: datetime = None) -> \
-                                        List[Tuple[str, str, str, str, float, str]]:
+                                  target_entity: str = None, confidence_score: float = None, date: datetime = None) -> \
+            List[Tuple[str, str, str, str, int, float, str]]:
         """
-        retrieve named entity bibcodes and related information based on the given parameters
+        retrieve named entity bibcodes and related information based on the given parameters, including feature_id
 
         :param feature_name_entity: the feature name entity to filter by (optional)
         :param feature_type_entity: the feature type entity to filter by (optional)
         :param target_entity: the target entity to filter by (optional)
         :param confidence_score: the minimum confidence score to filter by (optional)
         :param date: the minimum date to filter by (optional)
-        :return: a list of tuples containing (bibcode, target_entity, feature_type_entity, feature_name_entity, confidence_score, date)
+        :return: a list of tuples containing (bibcode, target_entity, feature_type_entity, feature_name_entity, feature_id, confidence_score, date)
         """
         result = []
         with self.session_scope() as session:
@@ -453,15 +453,21 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                                  NamedEntityHistory.target_entity,
                                  NamedEntityHistory.feature_type_entity,
                                  NamedEntityHistory.feature_name_entity,
+                                 FeatureName.entity_id,
                                  NamedEntity.confidence_score,
                                  NamedEntityHistory.date) \
                 .join(NamedEntity, NamedEntityHistory.id == NamedEntity.history_id) \
+                .join(FeatureName, and_(FeatureName.entity == NamedEntityHistory.feature_name_entity,
+                                        FeatureName.target_entity == NamedEntityHistory.target_entity)) \
                 .filter(and_(*conditions)) \
-                .order_by(NamedEntity.bibcode.asc(), NamedEntityHistory.feature_name_entity.asc(), NamedEntityHistory.date.asc()) \
+                .order_by(NamedEntity.bibcode.asc(),
+                          NamedEntityHistory.feature_name_entity.asc(),
+                          NamedEntityHistory.date.asc()) \
                 .distinct(NamedEntity.bibcode,
                           NamedEntityHistory.target_entity,
                           NamedEntityHistory.feature_type_entity,
                           NamedEntityHistory.feature_name_entity,
+                          FeatureName.entity_id,
                           NamedEntity.confidence_score,
                           NamedEntityHistory.date) \
                 .all()
@@ -472,10 +478,12 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                                    row.target_entity,
                                    row.feature_type_entity,
                                    row.feature_name_entity,
+                                   row.entity_id,
                                    row.confidence_score,
                                    row.date.strftime("%Y-%m-%d %H:%M:%S")))
             else:
-                self.logger.error(f'Unable to fetch `NamedEntity` data for {feature_name_entity}/{feature_type_entity}/{target_entity}/{confidence_score}.')
+                self.logger.error(
+                    f'Unable to fetch `NamedEntity` data for {feature_name_entity}/{feature_type_entity}/{target_entity}/{confidence_score}.')
 
         return result
 

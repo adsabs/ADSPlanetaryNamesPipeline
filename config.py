@@ -22,7 +22,7 @@ LOGGING_LEVEL = 'DEBUG'
 
 
 # celery config
-CELERY_INCLUDE = ['adsrefpipe.tasks']
+CELERY_INCLUDE = ['adsplanetnamepipe.tasks']
 CELERY_BROKER = 'pyamqp://'
 
 
@@ -32,7 +32,7 @@ MAX_QUEUE_RETRIES = 3
 
 PLANETARYNAMES_PIPELINE_FORMAT_SIGNIFICANT_DIGITS = 2
 
-PLANETARYNAMES_PIPELINE_NASA_CONCEPT_URL = 'notyetactive.com'
+PLANETARYNAMES_PIPELINE_NASA_CONCEPT_URL = 'http://0.0.0.0:5000'
 
 PLANETARYNAMES_PIPELINE_TOP_ASTRONOMY_JOURNALS = [
     "A&A", "AdSpR", "ApJ", "ApJL", "ApJS", "ChGeo", "E&PSL", "EM&P", "GeCoA", "Geo", "GeoJI", "GeoRL", "GGG", "Icar",

@@ -1,4 +1,4 @@
-adsputils==v1.5.4
+adsputils==v1.5.5
 alembic==1.4.3
 langdetect==1.0.9
 nltk==3.6.7

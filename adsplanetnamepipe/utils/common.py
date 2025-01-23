@@ -35,6 +35,7 @@ class PLANETARYNAMES_PIPELINE_ACTION(Enum):
     add_keyword_to_knowledge_graph = 'add_keyword_to_knowledge_graph'
     remove_keyword_from_knowledge_graph = 'remove_keyword_from_knowledge_graph'
     retrieve_identified_entities = 'retrieve_identified_entities'
+    retrieve_knowledge_graph_keywords = 'retrieve_knowledge_graph_keywords'
     update_database_with_usgs_entities = 'update_database_with_usgs_entities'
     invalid = 'invalid'
 
@@ -79,16 +80,23 @@ class EntityArgs():
         self.timestamp = timestamp
         self.all_targets = all_targets
 
+    def toJSON(self) -> dict:
+        """
+        convert the EntityArgs instance to a JSON-compatible dictionary
 
-class PlanetaryNomenclatureTask(TypedDict):
-    """
-    a TypedDict class representing a task in the planetary nomenclature pipeline
-
-    this class defines the structure of a task, including the type of action
-    to be performed and the associated entity arguments
-    """
-    action_type: PLANETARYNAMES_PIPELINE_ACTION
-    args: EntityArgs
+        :return: a dictionary representation of the EntityArgs instance
+        """
+        return {
+            "target": self.target,
+            "feature_type": self.feature_type,
+            "feature_type_plural": self.feature_type_plural,
+            "feature_name": self.feature_name,
+            "context_ambiguous_feature_names": self.context_ambiguous_feature_names,
+            "multi_token_containing_feature_names": self.multi_token_containing_feature_names,
+            "name_entity_labels": self.name_entity_labels,
+            "timestamp": self.timestamp,
+            "all_targets": self.all_targets,
+        }
 
 
 class Synonyms(object):

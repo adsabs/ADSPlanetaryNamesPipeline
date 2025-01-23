@@ -262,6 +262,18 @@ class NamedEntityLabel(Base):
         """
         return (0 if item.label == 'planetary' else 1, item.label)
 
+    @staticmethod
+    def verify_label(label: str) -> str:
+        """
+        verify if the provided label is valid and return it;
+        if invalid or empty, return the default label `planetary`.
+
+        :param label: the label to verify (e.g., `planetary`, `unknown`, or empty)
+        :return: str, the validated label (`planetary` or `unknown`)
+        """
+        valid_labels = {'planetary', 'unknown'}
+        return label if label in valid_labels else 'planetary'
+
 
 class KnowledgeBaseHistory(Base):
     """

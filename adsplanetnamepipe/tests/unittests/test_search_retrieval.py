@@ -113,6 +113,40 @@ class TestSearchRetrieval(unittest.TestCase):
         self.assertEqual(len(docs), 0)
 
     @patch('adsplanetnamepipe.utils.search_retrieval.SearchRetrieval.solr_query')
+    def test_identify_terms_query(self, mock_solr_query):
+        """ test identify_terms_query which returns the result of the query for identifying entities """
+
+        expected_query = f'full:(="Rayleigh") full:("Mars") full:("Crater" OR "Craters") '
+        expected_query += f'{self.search_retrieval.astronomy_journal_filter} {self.search_retrieval.other_usgs_filters} '
+        expected_query += f'{self.search_retrieval.date_time_filter}'
+
+        expected_result = [ {'bibcode': '2024arXiv240320332S'}, {'bibcode': '2024arXiv240320323T'}]
+
+        mock_solr_query.return_value = expected_result
+        result = self.search_retrieval.identify_terms_query()
+
+        mock_solr_query.assert_called_once_with(expected_query)
+        self.assertEqual(result, expected_result)
+
+    @patch('adsplanetnamepipe.utils.search_retrieval.SearchRetrieval.solr_query')
+    def test_identify_terms_query_no_docs(self, mock_solr_query):
+        """ test identify_terms_query when no documents are found or an error occurs """
+
+        expected_query = f'full:("Rayleigh") full:("Mars") full:("Crater" OR "Craters")  '
+        expected_query += f'{self.search_retrieval.astronomy_journal_filter} {self.search_retrieval.other_usgs_filters} '
+        expected_query += f'{self.search_retrieval.date_time_filter}'
+
+        # case 1: no documents found
+        mock_solr_query.return_value = []
+        result = self.search_retrieval.identify_terms_query()
+        self.assertEqual(result, [])
+
+        # case 2: error occurs
+        mock_solr_query.return_value = []
+        result = self.search_retrieval.identify_terms_query()
+        self.assertEqual(result, [])
+
+    @patch('adsplanetnamepipe.utils.search_retrieval.SearchRetrieval.solr_query')
     def test_collect_usgs_terms_query(self, mock_solr_query):
         """ test collect_usgs_terms_query which returns the result of query for the collect step positive """
 

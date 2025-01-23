@@ -3,6 +3,7 @@ import regex
 import math
 from collections import OrderedDict
 import requests
+from requests.exceptions import RequestException
 from typing import List, Dict, Tuple, Set
 
 from adsputils import setup_logging, load_config
@@ -371,24 +372,28 @@ class NASAWrapper():
         :param excerpt: input text excerpt
         :return: list of extracted keywords
         """
-        url = config['PLANETARYNAMES_PIPELINE_NASA_CONCEPT_URL']
-        payload = {
-            "text": excerpt,
-            "probability_threshold": 0.5,
-            "topic_threshold": 1,
-            "request_id": "example_request_id"
-        }
-        response = requests.post(url, json=payload)
+        try:
+            url = config['PLANETARYNAMES_PIPELINE_NASA_CONCEPT_URL']
+            payload = {
+                "text": excerpt,
+                "probability_threshold": 0.5,
+                "topic_threshold": 1,
+                "request_id": "example_request_id"
+            }
+            response = requests.post(url, json=payload)
 
-        if response.status_code == 200:
-            result = response.json()['payload']
-            sti_keywords = result.get('sti_keywords',[[]])[0]
+            if response.status_code == 200:
+                result = response.json()['payload']
+                sti_keywords = result.get('sti_keywords',[[]])[0]
 
-            # extract the 'unstemmed' from 'sti_keywords'
-            sti_keywords = [kw['unstemmed'].lower() for kw in sti_keywords]
-            return sti_keywords
-        else:
-            logger.error(f"From Nasa Concept status code {response.status_code}")
+                # extract the 'unstemmed' from 'sti_keywords'
+                sti_keywords = [kw['unstemmed'].lower() for kw in sti_keywords]
+                return sti_keywords
+            else:
+                logger.error(f"From Nasa Concept status code {response.status_code}")
+        except RequestException as e:
+            # logger.info('Not hosted by ADS.')
+            pass
         return []
 
 
