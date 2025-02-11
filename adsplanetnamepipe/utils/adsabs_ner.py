@@ -24,10 +24,10 @@ model_path = 'adsabs/astroBERT'
 # model_path = os.path.dirname(__file__) + '/astrobert_ner_files'
 model = AutoModelForTokenClassification.from_pretrained(pretrained_model_name_or_path=model_path, revision='NER-DEAL')
 tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=model_path, add_special_tokens=True, do_lower_case=False, model_max_length=130)
-astrobert_ner = TokenClassificationPipeline(model=model, tokenizer=tokenizer, task='astroBERT NER_DEAL', aggregation_strategy='average', ignore_labels=['O'])
+adsabs_ner = TokenClassificationPipeline(model=model, tokenizer=tokenizer, task='astroBERT NER_DEAL', aggregation_strategy='average', ignore_labels=['O'])
 
 
-class AstroBERTNER():
+class ADSabsNER():
 
     """
     a class that implements named entity recognition using the AstroBERT model
@@ -38,7 +38,7 @@ class AstroBERTNER():
     """
 
     # class-level reference to the global AstroBERT named entity recognition object
-    astrobert_ner = astrobert_ner
+    adsabs_ner = adsabs_ner
 
     # regular expression pattern to match author names in various formats
     author_pattern = r"((?:[A-Z][A-Za-z'`-]+)?(?:,?\s+(?:(?:van|von|de|der)\s+)?[A-Z][A-Za-z'`-]+)*(?:,?\s+(?:Jr\.|Sr\.|I{1,3}V?|IV|V|VI{1,3}))?\s*)"
@@ -54,7 +54,7 @@ class AstroBERTNER():
 
     def __init__(self, args: EntityArgs):
         """
-        initialize the AstroBERTNER class
+        initialize the ADSabsNER class
 
         :param args: configuration arguments for entity recognition
         """
@@ -79,7 +79,7 @@ class AstroBERTNER():
         :return: boolean indicating whether the feature name is a valid celestial object or region
         """
         try:
-            results = self.astrobert_ner(text)
+            results = self.adsabs_ner(text)
         except RuntimeError:
             logger.error('AstroBERT NER throw RuntimeError.')
             return False

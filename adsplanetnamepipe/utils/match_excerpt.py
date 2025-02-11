@@ -9,7 +9,7 @@ config.update(load_config())
 
 from adsplanetnamepipe.utils.common import EntityArgs, Synonyms, Unicode
 from adsplanetnamepipe.utils.extract_keywords import SpacyWrapper, YakeWrapper
-from adsplanetnamepipe.utils.astrobert_ner import AstroBERTNER
+from adsplanetnamepipe.utils.adsabs_ner import ADSabsNER
 
 from langdetect import detect
 
@@ -86,12 +86,12 @@ class MatchExcerpt(object):
         self.wnd = 64
         self.feature_types_and_target = '|'.join([item.capitalize() for item in ("%s, %s"%(self.args.feature_type, self.args.target)).split(', ')])
 
-    def forward(self, doc: Dict, astrobert_ner: AstroBERTNER = None, usgs_term: bool = True) -> Tuple[bool, List[str]]:
+    def forward(self, doc: Dict, adsabs_ner: ADSabsNER = None, usgs_term: bool = True) -> Tuple[bool, List[str]]:
         """
         process a document to extract relevant excerpts
 
         :param doc: input document as a dictionary
-        :param astrobert_ner: AstroBERTNER object for named entity recognition
+        :param adsabs_ner: ADSabsNER object for named entity recognition
         :param usgs_term: boolean indicating if processing USGS terms
         :return: tuple of boolean (indicating success) and list of relevant excerpts
         """
@@ -118,7 +118,7 @@ class MatchExcerpt(object):
             # for each excerpt if it is valid, in each step, keep it, otherwise filter it out
             for excerpt in excerpts:
                 if self.validate_feature_name(excerpt.excerpt, excerpt.entity_span_within_excerpt, usgs_term):
-                    if astrobert_ner.forward(excerpt.excerpt, excerpt.entity_span_within_excerpt):
+                    if adsabs_ner.forward(excerpt.excerpt, excerpt.entity_span_within_excerpt):
                         relevant_excerpts.append(excerpt.excerpt)
                     else:
                         logger.info(f"An excerpt from the record `{doc['bibcode']}` is determined not relevant by AstroBERT NER. Record filtered out.")

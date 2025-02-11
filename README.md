@@ -90,7 +90,7 @@ This pipeline processes planetary nomenclature to identify named entities (featu
 
 
 ### To export keywords from knowledge graph:
-    python run.py -a retrieve_knowledge_graph_keywords -t Mars -f Crater -l positive -o keywords_export.csv
+    python run.py -a retrieve_knowledge_graph_keywords -t Mars -f Crater -l planetary -o keywords_export.csv
 
 
 ### To update database with new USGS gazetteer data:
