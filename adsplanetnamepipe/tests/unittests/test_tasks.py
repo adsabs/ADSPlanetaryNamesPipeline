@@ -14,7 +14,7 @@ from adsplanetnamepipe.utils.common import PLANETARYNAMES_PIPELINE_ACTION, Entit
 class TestPlanetaryNomenclature(unittest.TestCase):
 
     def setUp(self):
-        """ Set up the config class and create an instance of AstroBERTNER """
+        """ Set up the config class and create an instance of ADSabsNER """
 
         self.args = EntityArgs(
             target="Mars",

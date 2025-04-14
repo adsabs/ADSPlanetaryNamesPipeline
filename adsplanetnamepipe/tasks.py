@@ -49,7 +49,9 @@ def task_process_planetary_nomenclature(the_task: dict) -> bool:
         entity_args = EntityArgs(**the_task["args"])
 
         # either: action to collect data to setup KB graph
-        if action_type in [PLANETARYNAMES_PIPELINE_ACTION.collect, PLANETARYNAMES_PIPELINE_ACTION.end_to_end]:
+        if action_type in [PLANETARYNAMES_PIPELINE_ACTION.collect,
+                           PLANETARYNAMES_PIPELINE_ACTION.end_to_end,
+                           PLANETARYNAMES_PIPELINE_ACTION.collect_recent]:
             knowledge_base_records = CollectKnowldegeBase(entity_args).collect()
             if knowledge_base_records:
                 return bool(app.insert_knowledge_base_records(knowledge_base_records))
@@ -58,7 +60,9 @@ def task_process_planetary_nomenclature(the_task: dict) -> bool:
             return False
 
         # or: action to identify and label entities
-        if action_type in [PLANETARYNAMES_PIPELINE_ACTION.identify, PLANETARYNAMES_PIPELINE_ACTION.end_to_end]:
+        if action_type in [PLANETARYNAMES_PIPELINE_ACTION.identify,
+                           PLANETARYNAMES_PIPELINE_ACTION.end_to_end,
+                           PLANETARYNAMES_PIPELINE_ACTION.identify_recent]:
             keywords_positive = app.get_knowledge_base_keywords(entity_args.feature_name,
                                                                 entity_args.feature_type,
                                                                 entity_args.target,
@@ -67,8 +71,7 @@ def task_process_planetary_nomenclature(the_task: dict) -> bool:
                                                                 entity_args.feature_type,
                                                                 entity_args.target,
                                                                 entity_args.name_entity_labels[1]['label'])
-            named_entity_records = IdentifyPlanetaryEntities(entity_args, keywords_positive,
-                                                             keywords_negative).identify()
+            named_entity_records = IdentifyPlanetaryEntities(entity_args, keywords_positive, keywords_negative).identify()
             if named_entity_records:
                 return bool(app.insert_named_entity_records(named_entity_records))
 

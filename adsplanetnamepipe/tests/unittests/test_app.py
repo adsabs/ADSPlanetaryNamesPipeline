@@ -3,7 +3,7 @@ project_home = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..
 if project_home not in sys.path:
     sys.path.insert(0, project_home)
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import time
 import re
 
@@ -562,34 +562,6 @@ class TesADSPlanetaryNamesPipelineCelery(unittest.TestCase):
         # check that the insertion was successful
         self.assertTrue(insertion_successful)
 
-    # def test_insert_ambiguous_feature_names(self):
-    #     """ test insert_ambiguous_feature_names method """
-    #
-    #     feature_name_target_list = [
-    #         ("Airy", "Venus"),              # ambiguous entities already exists, here is another
-    #         ("Coughlin", "Puck"),           # going to make Coughlin ambiguous now
-    #         ("feature_name_1", "Moon"),     # new feature name
-    #         ("feature_name_1", "Mars")      # new feature name becames ambiguous now
-    #     ]
-    #
-    #     # insert feature_name_1 into usgs table first
-    #     self.app.insert_new_usgs_nomenclature_entities(["feature_name_1"])
-    #
-    #     # call the function to insert data
-    #     insertion_successful = self.app.insert_ambiguous_feature_names(feature_name_target_list)
-    #
-    #     # verify that the insertion was successful
-    #     self.assertTrue(insertion_successful)
-    #
-    #     # verify the inserted entries
-    #     expected_matches = [
-    #         {'entity': 'Airy', 'context': ['Moon', 'Mars', 'Venus']},
-    #         {'entity': 'Coughlin', 'context': ['Pluto', 'Puck']},
-    #         {'entity': 'feature_name_1', 'context': ['Moon', 'Mars']}
-    #     ]
-    #     for expected_match in expected_matches:
-    #         self.assertEqual(sorted(self.app.get_context_ambiguous_feature_name(expected_match['entity'])), sorted(expected_match['context']))
-
     def test_insert_ambiguous_feature_names_when_not_ambiguous(self):
         """ test insert_ambiguous_feature_names method when feature names are not ambigous """
 
@@ -628,6 +600,110 @@ class TesADSPlanetaryNamesPipelineCelery(unittest.TestCase):
 
         # verify that the insertion was successful
         self.assertTrue(insertion_successful)
+
+    def test_get_all_feature_name_info(self):
+        """ test get_all_feature_name_info """
+
+        feature_name_info = self.app.get_all_feature_name_info()
+        self.assertTrue(len(feature_name_info) == 2090)
+        self.assertTrue(feature_name_info[0] == ('Venus', 'Dorsum', 'Abe Mango Dorsa'))
+        self.assertTrue(feature_name_info[-1] == ('Venus', 'Corona', 'Zywie Corona'))
+
+    def test_get_entities_for_knowledge_graph_update(self):
+        """ test get_entities_for_knowledge_graph_update """
+
+        # scenario 1: Verify initial state (all entries require processing)
+        feature_name_info = self.app.get_entities_for_knowledge_graph_update(datetime.now().date())
+        self.assertEqual(len(feature_name_info), 2090)
+        self.assertEqual(feature_name_info[0], ('Venus', 'Dorsum', 'Abe Mango Dorsa'))
+        self.assertEqual(feature_name_info[-1], ('Venus', 'Crater', 'von Suttner'))
+
+        # scenario 2: Add knowledge base history records (some outdated, some recent, some non-planetary)
+        # and verify not all records are included
+        knowledge_base_records: List[Tuple[KnowledgeBaseHistory, List[KnowledgeBase]]] = [
+            (KnowledgeBaseHistory(
+                id=None,
+                feature_name_entity='Adlivun Cavus',
+                feature_type_entity='Cavus',
+                target_entity='Pluto',
+                named_entity_label='planetary',
+                date=datetime.now() - timedelta(days=90)  # outdated entry
+            ), []),
+            (KnowledgeBaseHistory(
+                id=None,
+                feature_name_entity='Hekla Cavus',
+                feature_type_entity='Cavus',
+                target_entity='Pluto',
+                named_entity_label='planetary',
+                date=datetime.now() - timedelta(days=5)  # recent entry both labels are included (should be ignored)
+            ), [KnowledgeBase(
+                            history_id=None,
+                            bibcode='thebibcodehere',
+                            database='astronomy',
+                            excerpt=None,
+                            keywords_item_id=0,
+                            keywords=[],
+                            special_keywords=[])]),
+            (KnowledgeBaseHistory(
+                id=None,
+                feature_name_entity='Hekla Cavus',
+                feature_type_entity='Cavus',
+                target_entity='Pluto',
+                named_entity_label='non planetary',
+                date=datetime.now() - timedelta(days=5)  # recent entry both labels are included (should be ignored)
+            ), [KnowledgeBase(
+                            history_id=None,
+                            bibcode='thebibcodehere2',
+                            database='general',
+                            excerpt=None,
+                            keywords_item_id=0,
+                            keywords=[],
+                            special_keywords=[])]),
+            (KnowledgeBaseHistory(
+                id=None,
+                feature_name_entity='Burney',
+                feature_type_entity='Crater',
+                target_entity='Pluto',
+                named_entity_label='non planetary',
+                date=datetime.now() - timedelta(days=90)  # outdated but non-planetary only (should be included)
+            ), []),
+            (KnowledgeBaseHistory(
+                id=None,
+                feature_name_entity='Antoniadi',
+                feature_type_entity='Crater',
+                target_entity='Mars',
+                named_entity_label='planetary',
+                date=datetime.now() - timedelta(days=5)  # recent but non-planetary only (should be included)
+            ), []),
+            (KnowledgeBaseHistory(
+                id=None,
+                feature_name_entity='Rayleigh',
+                feature_type_entity='Crater',
+                target_entity='Moon',
+                named_entity_label='planetary',
+                date=datetime.now() - timedelta(days=90)  # outdated (should be included)
+            ), [])
+        ]
+        # insert knowledge base records
+        self.assertTrue(self.app.insert_knowledge_base_records(knowledge_base_records))
+
+        # verify that only planetary and outdated records are considered
+        feature_name_info = self.app.get_entities_for_knowledge_graph_update(datetime.now() - timedelta(days=30))
+
+        # one record ('Pluto', 'Cavus', 'Hekla Cavus') is skipped, since both planetary and non planetary
+        # with reocrds in KnowledgeBase exits and the date is recent
+        self.assertEqual(len(feature_name_info), 2089)
+        self.assertEqual(feature_name_info[0], ('Venus', 'Dorsum', 'Abe Mango Dorsa'))
+        self.assertEqual(feature_name_info[-1], ('Venus', 'Crater', 'von Suttner'))
+
+        # check that the outdated planetary entry is included
+        self.assertIn(('Pluto', 'Cavus', 'Adlivun Cavus'), feature_name_info)
+        self.assertIn(('Mars', 'Crater', 'Antoniadi'), feature_name_info)
+        self.assertIn(('Pluto', 'Crater', 'Burney'), feature_name_info)
+        self.assertIn(('Moon', 'Crater', 'Rayleigh'), feature_name_info)
+
+        # ensure expected record is not returned
+        self.assertNotIn(('Pluto', 'Cavus', 'Hekla Cavus'), feature_name_info)
 
 
 class TestADSPlanetaryNamesPipelineCeleryNoStubdata(unittest.TestCase):
@@ -1058,6 +1134,24 @@ class TestADSPlanetaryNamesPipelineCeleryNoStubdata(unittest.TestCase):
 
         result = self.app.get_context_entities()
         self.assertEqual(result, [])
+
+    def test_get_all_feature_name_info_no_record(self):
+        """ test get_all_feature_name_info when no records are fetched """
+
+        with patch.object(self.app.logger, 'error') as mock_error:
+            result = self.app.get_all_feature_name_info()
+
+            self.assertEqual(result, [])
+            mock_error.assert_called_with(f"Unable to fetch all feature name entity information.")
+
+    def test_get_entities_for_knowledge_graph_update_no_record(self):
+        """ test get_entities_for_knowledge_graph_update when no records are fetched """
+
+        with patch.object(self.app.logger, 'info') as mock_error:
+            result = self.app.get_entities_for_knowledge_graph_update(datetime.now().date())
+
+            self.assertEqual(result, [])
+            mock_error.assert_called_with(f"No entities require updating for the knowledge graph.")
 
 
 if __name__ == '__main__':

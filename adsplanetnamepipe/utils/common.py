@@ -37,6 +37,8 @@ class PLANETARYNAMES_PIPELINE_ACTION(Enum):
     retrieve_identified_entities = 'retrieve_identified_entities'
     retrieve_knowledge_graph_keywords = 'retrieve_knowledge_graph_keywords'
     update_database_with_usgs_entities = 'update_database_with_usgs_entities'
+    collect_recent = 'collect_recent'
+    identify_recent = 'identify_recent'
     invalid = 'invalid'
 
 

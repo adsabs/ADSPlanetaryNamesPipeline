@@ -58,6 +58,27 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                 self.logger.error(f"No feature name entities are found for {target_entity}/{feature_type_entity}.")
         return []
 
+    def get_all_feature_name_info(self) -> List[Tuple[str, str, str]]:
+        """
+        return all the feature name entities and the corresponding target and feature type
+
+        :return: a list of tuples containing (feature_name_entity, feature_type_entity, target_entity)
+        """
+        with self.session_scope() as session:
+            # different sorting is done locally vs upstream so make sure feature name entity is treated case-insensitive
+            rows = session.query(FeatureName).order_by(func.upper(FeatureName.entity).asc(),
+                                                       FeatureName.target_entity.asc(),
+                                                       FeatureName.feature_type_entity.asc()).all()
+            if rows:
+                feature_name_entities = []
+                for row in rows:
+                    feature_name_entities.append((row.target_entity, row.feature_type_entity, row.entity))
+                return feature_name_entities
+            else:
+                self.logger.error(f"Unable to fetch all feature name entity information.")
+        return []
+
+
     def get_feature_type_entity(self, target_entity: str, feature_name_entity: str) -> str:
         """
         return a feature type given target and feature name
@@ -201,12 +222,15 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
             try:
                 for history_entry, knowledge_base_entries in knowledge_base_list:
                     session.add(history_entry)
-                    session.flush()  # flush to generate the ID for the history entry
+                    # flush to generate the ID for the history entry
+                    session.flush()
 
-                    for knowledge_base_entry in knowledge_base_entries:
-                        knowledge_base_entry.history_id = history_entry.id  # assign the generated history ID to the KnowledgeBase entry
+                    if knowledge_base_entries:
+                        for knowledge_base_entry in knowledge_base_entries:
+                            # assign the generated history ID to the KnowledgeBase entry
+                            knowledge_base_entry.history_id = history_entry.id
 
-                    session.bulk_save_objects(knowledge_base_entries)
+                        session.bulk_save_objects(knowledge_base_entries)
                 session.commit()
                 self.logger.debug("Added `KnowledgeBaseHistory` and `KnowledgeBase` records successfully.")
                 return True
@@ -406,12 +430,15 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
             try:
                 for history_entry, named_entity_entries in named_entity_list:
                     session.add(history_entry)
-                    session.flush()  # flush to generate the ID for the history entry
+                    # flush to generate the ID for the history entry
+                    session.flush()
 
-                    for named_entity_entry in named_entity_entries:
-                        named_entity_entry.history_id = history_entry.id  # assign the generated history ID to the KnowledgeBase entry
+                    if named_entity_entries:
+                        for named_entity_entry in named_entity_entries:
+                            # assign the generated history ID to the KnowledgeBase entry
+                            named_entity_entry.history_id = history_entry.id
 
-                    session.bulk_save_objects(named_entity_entries)
+                        session.bulk_save_objects(named_entity_entries)
 
                 session.commit()
                 self.logger.debug("Added `NamedEntityHistory` and `NamedEntity` records successfully.")
@@ -482,8 +509,7 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                                    row.confidence_score,
                                    row.date.strftime("%Y-%m-%d %H:%M:%S")))
             else:
-                self.logger.error(
-                    f'Unable to fetch `NamedEntity` data for {feature_name_entity}/{feature_type_entity}/{target_entity}/{confidence_score}.')
+                self.logger.error(f"Unable to fetch `NamedEntity` data for {feature_name_entity}/{feature_type_entity}/{target_entity}/{confidence_score}.")
 
         return result
 
@@ -616,18 +642,6 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
         :return: list of feature names and the associated target that because of new additions will become ambiguous
         """
         with self.session_scope() as session:
-            # # get matching feature names and targets excluding those in AmbiguousFeatureName already
-            # rows = session.query(FeatureName.entity, FeatureName.target_entity) \
-            #     .filter(FeatureName.entity.in_(feature_name_list)) \
-            #     .filter(~session.query(AmbiguousFeatureName) \
-            #             .filter(and_(AmbiguousFeatureName.entity == FeatureName.entity,
-            #                          AmbiguousFeatureName.context == FeatureName.target_entity)) \
-            #             .exists()) \
-            #     .group_by(FeatureName.entity) \
-            #     .having(func.count(FeatureName.target_entity) > 1) \
-            #     .all()
-
-
             # query for entities that appear more than once in FeatureName table
             subquery = session.query(FeatureName.entity) \
                 .filter(FeatureName.entity.in_(feature_name_list)) \
@@ -769,7 +783,7 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
             # query usgs table for any matches that contains these tokens
             matched_entities = self.get_matched_usgs_entities(all_tokens)
 
-           # collect associations to be added based on matches
+            # collect associations to be added based on matches
             new_multi_token_entities = []
             for i, feature_name in enumerate(feature_name_list):
                 for matched_entity in matched_entities:
@@ -853,3 +867,44 @@ class ADSPlanetaryNamesPipelineCelery(ADSCelery):
                             return self.insert_multi_token_feature_names(new_feature_names)
 
         return False
+
+    def get_entities_for_knowledge_graph_update(self, date) -> List[Tuple[str, str, str]]:
+        """
+        retrieve feature name entities that have not been processed yet or are outdated based on the given threshold
+
+        :param date: the minimum date to filter by
+        :return: a list of tuples containing (feature_name_entity, feature_type_entity, target_entity)
+        """
+        result = []
+        with self.session_scope() as session:
+            # unprocessed entities: Feature names with no corresponding entry in knowledge_base_history
+            unprocessed_entities = session.query(FeatureName.entity,
+                                                 FeatureName.feature_type_entity,
+                                                 FeatureName.target_entity) \
+                .outerjoin(KnowledgeBaseHistory, and_(FeatureName.entity == KnowledgeBaseHistory.feature_name_entity,
+                                                      FeatureName.target_entity == KnowledgeBaseHistory.target_entity)) \
+                .outerjoin(KnowledgeBase, KnowledgeBase.history_id == KnowledgeBaseHistory.id) \
+                .filter(KnowledgeBaseHistory.id.is_(None))
+
+            # outdated entities: Entries older than the target_date, or missing
+            outdated_entities = session.query(KnowledgeBaseHistory.feature_name_entity,
+                                              KnowledgeBaseHistory.feature_type_entity,
+                                              KnowledgeBaseHistory.target_entity) \
+                .outerjoin(KnowledgeBase, KnowledgeBase.history_id == KnowledgeBaseHistory.id) \
+                .filter(or_(KnowledgeBaseHistory.date < date,
+                            KnowledgeBase.history_id.is_(None)))
+
+            # combine unprocessed and outdated entities
+            rows = unprocessed_entities.union(outdated_entities).all()
+
+            if len(rows) > 0:
+                for row in rows:
+                    result.append((row.target_entity, row.feature_type_entity, row.entity))
+                # convert to set to ensure uniqueness
+                # result = list(set(result))
+                # convert back to sorted list (sorted by entity, then target, then feature type)
+                result = sorted(result, key=lambda x: (x[2], x[0], x[1]))
+            else:
+                self.logger.info("No entities require updating for the knowledge graph.")
+
+        return result

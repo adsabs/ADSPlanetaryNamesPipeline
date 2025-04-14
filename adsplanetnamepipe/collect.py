@@ -5,7 +5,7 @@ from adsplanetnamepipe.utils.common import EntityArgs, Synonyms
 from adsplanetnamepipe.utils.search_retrieval import SearchRetrieval
 from adsplanetnamepipe.utils.match_excerpt import MatchExcerpt
 from adsplanetnamepipe.utils.extract_keywords import ExtractKeywords
-from adsplanetnamepipe.utils.astrobert_ner import AstroBERTNER
+from adsplanetnamepipe.utils.adsabs_ner import ADSabsNER
 from adsplanetnamepipe.utils.local_llm import LocalLLM
 from adsplanetnamepipe.utils.paper_relevance import PaperRelevance
 
@@ -32,7 +32,7 @@ class CollectKnowldegeBase():
         # step 2 of the pipeline
         self.match_excerpt = MatchExcerpt(args)
         # step 3 of the pipeline
-        self.astrobert_ner = AstroBERTNER(args)
+        self.adsabs_ner = ADSabsNER(args)
         # step 4 of the pipeline
         self.extract_keywords = ExtractKeywords(args)
         # step 5b of the pipeline, only scoring the positive records
@@ -89,11 +89,11 @@ class CollectKnowldegeBase():
             )
             for i, doc in enumerate(docs):
                 # for each doc temp list of KnowledgeBase records and the corresponding llm scores
-                # return the collected data only if the it passes the two scores (llm and paper)
+                # return the collected data only if it passes the two scores (llm and paper)
                 collected_doc: List[KnowledgeBase] = []
                 local_llm_scores_doc = []
 
-                _, excerpts = self.match_excerpt.forward(doc, self.astrobert_ner)
+                _, excerpts = self.match_excerpt.forward(doc, self.adsabs_ner)
                 if excerpts:
                     paper_relevance_score = self.get_paper_relevance_score(doc)
 
@@ -117,11 +117,10 @@ class CollectKnowldegeBase():
                         excerpt_keywords = self.extract_keywords.forward(excerpt, num_keywords=10)
                         if excerpt_keywords:
                             special_keywords = self.extract_keywords.forward_special(excerpt)
-                            # include it if least one STI-keyword was selected
-                            # TODO: once nasa package is installed changed replace >= to >
-                            if len(special_keywords) >= 0:
+                            # include this excerpt only if there are any STI-keywords identified
+                            if special_keywords:
                                 collected_doc.append(KnowledgeBase(
-                                    history_id=None,  # Set to None for now, will be updated later
+                                    history_id=None,  # set to None for now, will be updated downstream
                                     bibcode=doc['bibcode'],
                                     database=doc['database'],
                                     excerpt=excerpt,

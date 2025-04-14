@@ -43,7 +43,6 @@ This pipeline processes planetary nomenclature to identify named entities (featu
     -k, --keyword           Knowledge graph keyword to add/remove/export
     -c, --confidence_score  (optional) Filter by minimum confidence score
     -d, --days              (optional) Filter by days for retrieve_identified_entities action
-    -s, --timestamp         (optional) Specify date in YYYY-MM-DD format for identification actions
     -u, --usgs_update       CSV file for USGS data update
     -o, --output_file       (optional) Specify file name for data export
     -l, --label             (optional) Specify label of the knowledge graph keywords to export (e.g, planetary or unknown)
@@ -65,8 +64,8 @@ This pipeline processes planetary nomenclature to identify named entities (featu
     python run.py -a end_to_end -t Mercury -f Crater
 
 
-### To identify features using a specific timestamp:
-    python run.py -a identify -t Mars -f Crater -s 2023-01-01
+### To identify features from records published within the last n days:
+    python run.py -a identify -t Mars -f Crater -d 30
 
 
 ### To query database for identified entities from last 30 days with confidence >= 0.8:
@@ -90,7 +89,7 @@ This pipeline processes planetary nomenclature to identify named entities (featu
 
 
 ### To export keywords from knowledge graph:
-    python run.py -a retrieve_knowledge_graph_keywords -t Mars -f Crater -l positive -o keywords_export.csv
+    python run.py -a retrieve_knowledge_graph_keywords -t Mars -f Crater -l planetary -o keywords_export.csv
 
 
 ### To update database with new USGS gazetteer data:
@@ -106,8 +105,16 @@ This pipeline processes planetary nomenclature to identify named entities (featu
 
 
 ### To retrieve knowledge graph keywords for specific feature:
-    python run.py -a retrieve_knowledge_graph_keywords -t Mars -n Amenthes -l planetary## Maintainers
-    
+    python run.py -a retrieve_knowledge_graph_keywords -t Mars -n Amenthes -l planetary
+
+
+### To collect knowledge graph keywords if older than a specific number of days:
+    python run.py -a collect_recent -d 30
+
+
+### To identify all feature names published within the last n days:
+    python run.py -a identify_recent -d 30
+
 
 
 ## Maintainers

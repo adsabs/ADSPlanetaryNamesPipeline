@@ -158,7 +158,7 @@ class TestMatchExcerpt(unittest.TestCase):
                                                           True)
         self.assertFalse(result)
 
-    @patch('adsplanetnamepipe.utils.match_excerpt.AstroBERTNER')
+    @patch('adsplanetnamepipe.utils.match_excerpt.ADSabsNER')
     @patch('adsplanetnamepipe.utils.match_excerpt.logger')
     def test_forward_1(self, mock_logger, mock_astrobert_ner):
         """ Test the forward method -- case 1: usgs_term=True, relevant document """
@@ -174,7 +174,7 @@ class TestMatchExcerpt(unittest.TestCase):
         self.assertEqual(result[1], [excerpts.doc_1_excerpts[0]['excerpt'], excerpts.doc_1_excerpts[1]['excerpt']])
         mock_logger.info.assert_called_with("For record `2010JGRE..115.0F08G` there are 2 relevant excerpts extracted in the step Match Excerpts.")
 
-    @patch('adsplanetnamepipe.utils.match_excerpt.AstroBERTNER')
+    @patch('adsplanetnamepipe.utils.match_excerpt.ADSabsNER')
     @patch('adsplanetnamepipe.utils.match_excerpt.logger')
     def test_forward_2(self, mock_logger, mock_astrobert_ner):
         """ Test the forward method -- case 2: usgs_term=True, irrelevant document """
@@ -187,7 +187,7 @@ class TestMatchExcerpt(unittest.TestCase):
         self.assertEqual(result[1], [])
         mock_logger.info.assert_called_with("Record `2023Icar..39615503S` is determined not to be relevant for target Mars. Record filtered out.")
 
-    @patch('adsplanetnamepipe.utils.match_excerpt.AstroBERTNER')
+    @patch('adsplanetnamepipe.utils.match_excerpt.ADSabsNER')
     @patch('adsplanetnamepipe.utils.match_excerpt.logger')
     def test_forward_3(self, mock_logger, mock_astrobert_ner):
         """ Test the forward method -- case 3: usgs_term=False, non-planetary context """
@@ -198,7 +198,7 @@ class TestMatchExcerpt(unittest.TestCase):
         self.assertEqual(result[1], [])
         mock_logger.info.assert_called_with("For record `2023GeoRL..5001666K` determined it is not planetary record and hence keywords will be extacted from the fulltext in the next step.")
 
-    @patch('adsplanetnamepipe.utils.match_excerpt.AstroBERTNER')
+    @patch('adsplanetnamepipe.utils.match_excerpt.ADSabsNER')
     @patch('adsplanetnamepipe.utils.match_excerpt.logger')
     def test_forward_4(self, mock_logger, mock_astrobert_ner):
         """ Test the forward method -- case 4: usgs_term=False, planetary context """
@@ -209,10 +209,10 @@ class TestMatchExcerpt(unittest.TestCase):
         self.assertEqual(result[1], [])
         mock_logger.info.assert_called_with("Record `2010JGRE..115.0F08G` is determined to be usgs relevant, and hence cannot be processed for non usgs phase.")
 
-    @patch('adsplanetnamepipe.utils.match_excerpt.AstroBERTNER')
+    @patch('adsplanetnamepipe.utils.match_excerpt.ADSabsNER')
     @patch('adsplanetnamepipe.utils.match_excerpt.logger')
     def test_forward_5(self, mock_logger, mock_astrobert_ner):
-        """ Test the forward method -- case 5: when excerpt is determined by astrobert_ner not to be relevant """
+        """ Test the forward method -- case 5: when excerpt is determined by adsabs_ner not to be relevant """
 
         self.match_excerpt.get_fulltext = MagicMock(return_value=f"{' '.join(solrdata.doc_1['title'])} {solrdata.doc_1['abstract']} {solrdata.doc_1['body']}")
         self.match_excerpt.determine_celestial_body_relevance = MagicMock(return_value=True)
@@ -225,7 +225,7 @@ class TestMatchExcerpt(unittest.TestCase):
         mock_logger.info.assert_any_call("An excerpt from the record `2010JGRE..115.0F08G` is determined not relevant by AstroBERT NER. Record filtered out.")
         mock_logger.info.assert_any_call("For record `2010JGRE..115.0F08G` there are 0 relevant excerpts extracted in the step Match Excerpts.")
 
-    @patch('adsplanetnamepipe.utils.match_excerpt.AstroBERTNER')
+    @patch('adsplanetnamepipe.utils.match_excerpt.ADSabsNER')
     @patch('adsplanetnamepipe.utils.match_excerpt.logger')
     def test_forward_6(self, mock_logger, mock_astrobert_ner):
         """ Test the forward method -- case 6: when excerpt is determined by token_phrase analysis not to be relevant """
@@ -241,7 +241,7 @@ class TestMatchExcerpt(unittest.TestCase):
         mock_logger.info.assert_any_call("An excerpt from the record `2010JGRE..115.0F08G` is determined not relevant by token/pharse analysis. Record filtered out.")
         mock_logger.info.assert_any_call("For record `2010JGRE..115.0F08G` there are 0 relevant excerpts extracted in the step Match Excerpts.")
 
-    @patch('adsplanetnamepipe.utils.match_excerpt.AstroBERTNER')
+    @patch('adsplanetnamepipe.utils.match_excerpt.ADSabsNER')
     @patch('adsplanetnamepipe.utils.match_excerpt.logger')
     def test_forward_7(self, mock_logger, mock_astrobert_ner):
         """ Test the forward method -- case 7: when the record is determined not to be English """

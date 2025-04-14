@@ -105,6 +105,7 @@ class TestCollectKnowldegeBase(unittest.TestCase):
         self.identify_planetary_entities.search_retrieval.identify_terms_query = MagicMock(return_value=[solrdata.doc_1])
         self.identify_planetary_entities.match_excerpt.forward = MagicMock(return_value=(True, [excerpts.doc_1_excerpts[0]['excerpt']]))
         self.identify_planetary_entities.extract_keywords.forward = MagicMock(return_value=keywords_forward)
+        self.identify_planetary_entities.extract_keywords.forward_special = MagicMock(return_value=[])
         self.identify_planetary_entities.knowledge_graph_positive.forward = MagicMock(return_value=0.7)
         self.identify_planetary_entities.knowledge_graph_negative.forward = MagicMock(return_value=0.3)
 

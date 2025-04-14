@@ -32,7 +32,7 @@ def map_input_param_to_action_type(input_param: str) -> PLANETARYNAMES_PIPELINE_
         return PLANETARYNAMES_PIPELINE_ACTION.invalid
 
 
-def get_default_filename(action_type: str) -> str:
+def get_default_filename(action_type: PLANETARYNAMES_PIPELINE_ACTION) -> str:
     """
     get the default filename based on the action type and current timestamp
 
@@ -47,7 +47,7 @@ def get_default_filename(action_type: str) -> str:
     return ''
 
 
-def process_a_feature_name(feature_name: str, target: str, feature_type: str, action_type: str,
+def process_a_feature_name(feature_name: str, target: str, feature_type: str, action_type: PLANETARYNAMES_PIPELINE_ACTION,
                            keyword: str, timestamp: datetime, output_file: str, label: str):
     """
     processes a single feature name based on the provided action type
@@ -55,7 +55,7 @@ def process_a_feature_name(feature_name: str, target: str, feature_type: str, ac
     :param feature_name: str, the name of the feature to be processed
     :param target: str, the current target entity (e.g., Moon, Mars)
     :param feature_type: str, the feature type (e.g., Crater)
-    :param action_type: str, the action to perform (e.g., collect, identify, etc.)
+    :param action_type: PLANETARYNAMES_PIPELINE_ACTION, the action to perform (e.g., collect, identify, etc.)
     :param keyword: str, the keyword to be used for keyword-related actions, otherwise it is empty
     :param timestamp: datetime, timestamp for identifying or processing entities
     :param output_file: str, the file name for data export
@@ -68,13 +68,15 @@ def process_a_feature_name(feature_name: str, target: str, feature_type: str, ac
                              context_ambiguous_feature_names=app.get_context_ambiguous_feature_name(feature_name),
                              multi_token_containing_feature_names=app.get_multi_token_containing_feature_name(feature_name),
                              name_entity_labels=app.get_named_entity_label(),
-                             timestamp=timestamp,
+                             timestamp=str(timestamp.date()),
                              all_targets=app.get_target_entities())
 
     # these actions go through queue
     if action_type in [PLANETARYNAMES_PIPELINE_ACTION.collect,
                        PLANETARYNAMES_PIPELINE_ACTION.identify,
-                       PLANETARYNAMES_PIPELINE_ACTION.end_to_end]:
+                       PLANETARYNAMES_PIPELINE_ACTION.end_to_end,
+                       PLANETARYNAMES_PIPELINE_ACTION.collect_recent,
+                       PLANETARYNAMES_PIPELINE_ACTION.identify_recent]:
         # serialize before queueing
         the_task = {'action_type': action_type.value, 'args': entity_args.toJSON()}
         tasks.task_process_planetary_nomenclature.delay(the_task)
@@ -153,46 +155,29 @@ def import_usgs_update(usgs_update_file: str):
             logger.error("Failed to import USGS Gazetteer.")
 
 
-def get_date(days: int) -> datetime:
+def get_date(days: int, default_timestamp: str) -> datetime:
     """
-    calculates a target date based on the number of days provided
-    if days is 0, it returns the earliest possible datetime (datetime.min).
+    Calculates a target date based on the number of days provided.
+    If days is 0, it returns the default timestamp or datetime.min if parsing fails.
 
     :param days: int, the number of days to subtract from the current date. Can be 0 or a positive integer.
-    :return: datetime, a datetime object representing either the target date or the earliest possible datetime if days is 0.
+    :param default_timestamp: str, the timestamp should be in 'YYYY-MM-DD' format
+    :return: datetime, a datetime object representing the target date or a fallback.
     """
+    try:
+        days = int(days)
+    except (ValueError, TypeError):
+        days = 0
+
     if not days or days == 0:
-        return datetime.min
+        try:
+            return datetime.strptime(default_timestamp, "%Y-%m-%d")
+        except ValueError:
+            return datetime.min
 
     target_date = datetime.now().date() - timedelta(days=days)
     target_datetime = datetime.combine(target_date, datetime.now().time())
     return target_datetime
-
-
-def process_timestamp(action_type: str, timestamp_arg: str, default_timestamp: datetime) -> datetime:
-    """
-    processes the timestamp argument based on the provided action type
-
-    :param action_type: str, the type of action being performed (e.g., identify, end_to_end, etc.)
-    :param timestamp_arg: str, the timestamp argument provided (if any), should be in 'YYYY-MM-DD' format
-    :param :param default_timestamp: datetime, the default timestamp to be used if no valid input is provided or if the action type does not support timestamp processing
-    :return: datetime, the processed timestamp value
-    """
-    if action_type in [PLANETARYNAMES_PIPELINE_ACTION.identify, PLANETARYNAMES_PIPELINE_ACTION.end_to_end]:
-        if timestamp_arg:
-            try:
-                # verify the format of the timestamp
-                timestamp = datetime.strptime(timestamp_arg, '%Y-%m-%d')
-            except ValueError:
-                logger.error(f"The timestamp '{timestamp_arg}' is not in the correct format YYYY-MM-DD. Default 2000-01-01 is used.")
-                timestamp = default_timestamp
-        else:
-            timestamp = default_timestamp
-    else:
-        logger.info("`timestamp` argument is only applicable when action=identify. Ignoring the timestamp using default 2000-01-01.")
-        timestamp = default_timestamp
-
-    return timestamp
 
 
 def verify_arguments(args: argparse) -> Tuple[str, str, List[str]]:
@@ -222,8 +207,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-n', '--feature_name', help='feature name (e.g., Apollo). capitalized.')
     parser.add_argument('-k', '--keyword', help='knowledge graph keyword to add/remove/export.')
     parser.add_argument('-c', '--confidence_score', help='optional: filter by minimum confidence score.')
-    parser.add_argument('-d', '--days', help='optional: filter by days for retrieve_identified_entities action.')
-    parser.add_argument('-s', '--timestamp', help='optional: specify date in YYYY-MM-DD format for identification actions.')
+    parser.add_argument('-d', '--days', help='optional: filter by days for retrieve_identified_entities, collect_recent, and actions.')
     parser.add_argument('-u', '--usgs_update', help='CSV file for USGS data update.')
     parser.add_argument('-o', '--output_file', help='optional: specify file name for data export. If omitted, defaults to `keywords_export_<timestamp>.csv` or `identified_entities_<timestamp>.csv`, saved in the current directory.')
     parser.add_argument('-l', '--label', help='optional: specify label of the knowledge graph keywords to export (e.g, planetary or unknown).')
@@ -232,15 +216,17 @@ def parse_arguments() -> argparse.Namespace:
 
 # python run.py -t Mars -f "Albedo Feature" -a collect
 # python run.py -t Mars -n Amenthes -a collect
+# python run.py -t Mars -f "Albedo Feature" -a identify
+# python run.py -t Mars -n Amenthes -a identify
 # python run.py -t Mars -n Amenthes -a remove_all_but_last
 # python run.py -t Mars -n Amenthes -a remove_the_most_recent
 # python run.py -t Mars -n Amenthes -a add_keyword_to_knowledge_graph -k basin -t Moon -f Apollo
 # python run.py -t Mars -n Amenthes -a remove_keyword_from_knowledge_graph
 # python run.py -t Mars -n Amenthes -a retrieve_identified_entities -c 0.75
 # python run.py -t Mars -n Amenthes -a retrieve_knowledge_graph_keywords -l planetary
-# TODO: add a command to run all the feature types for all celestial bodies for collect step
-# TODO: add a command to run all the feature names since d days ago
 # python run.py -a update_database_with_usgs_entities -u updated_usgs_terms.csv
+# python run.py -a collect_recent
+# python run.py -a identify_recent
 
 # Main entry point of the script.
 # Sets up argument parsing, processes the arguments, and executes the appropriate action based on the provided command-line arguments.
@@ -256,7 +242,7 @@ if __name__ == '__main__':
         logger.info('The action arg (-a) is needed for processing! Terminating!')
         sys.exit(1)
 
-    # the only action command with no required parameter
+    # this action command has no required parameter
     if action_type == PLANETARYNAMES_PIPELINE_ACTION.retrieve_identified_entities:
         current_target, current_feature_type, current_feature_names = verify_arguments(args)
         current_feature_names = current_feature_names if len(current_feature_names) > 0 else ['']
@@ -265,8 +251,7 @@ if __name__ == '__main__':
                                                     feature_type_entity=current_feature_type,
                                                     target_entity=current_target,
                                                     confidence_score=args.confidence_score,
-                                                    date=get_date(args.days))
-
+                                                    date=get_date(args.days, config['PLANETARYNAMES_PIPELINE_DEFAULT_TIMESTAMP']))
 
             if results:
                 output_file = args.output_file if args.output_file else get_default_filename(action_type)
@@ -276,6 +261,26 @@ if __name__ == '__main__':
                     logger.error(f"Failed to add {len(results)} identified entities for feature name '{feature_name}', feature type '{current_feature_type}', target '{current_target}' to '{output_file}'.")
             else:
                 logger.info(f"No identified entities for feature name '{feature_name}', feature type '{current_feature_type}', target '{current_target}'.")
+
+    # another action command with an optional parameter (days)
+    elif action_type == PLANETARYNAMES_PIPELINE_ACTION.collect_recent:
+        results = app.get_entities_for_knowledge_graph_update(date=get_date(args.days, config['PLANETARYNAMES_PIPELINE_DEFAULT_TIMESTAMP']))
+
+        if results:
+            timestamp = get_date(args.days, config['PLANETARYNAMES_PIPELINE_DEFAULT_TIMESTAMP'])
+            for (current_target, current_feature_type, feature_name) in results:
+                process_a_feature_name(feature_name, current_target, current_feature_type, action_type, args.keyword,
+                                       timestamp, args.output_file, args.label)
+
+    # one more action command with one optional parameter (days)
+    elif action_type == PLANETARYNAMES_PIPELINE_ACTION.identify_recent:
+        results = app.get_all_feature_name_info()
+
+        if results:
+            timestamp = get_date(args.days, config['PLANETARYNAMES_PIPELINE_DEFAULT_TIMESTAMP'])
+            for (current_target, current_feature_type, feature_name) in results:
+                process_a_feature_name(feature_name, current_target, current_feature_type, action_type, args.keyword,
+                                       timestamp, args.output_file, args.label)
 
     # this action requires one parameter: the csv file extracted info from usgs recently
     elif action_type == PLANETARYNAMES_PIPELINE_ACTION.update_database_with_usgs_entities:
@@ -288,7 +293,7 @@ if __name__ == '__main__':
     # the rest of the actions require the target and either feature name or feature type arguments
     else:
         if args.target:
-            timestamp = process_timestamp(action_type, args.timestamp, config['PLANETARYNAMES_PIPELINE_DEFAULT_TIMESTAMP'])
+            timestamp = get_date(args.days, config['PLANETARYNAMES_PIPELINE_DEFAULT_TIMESTAMP'])
             current_target, current_feature_type, current_feature_names = verify_arguments(args)
             # optional params
             if current_target and (current_feature_type or current_feature_names):

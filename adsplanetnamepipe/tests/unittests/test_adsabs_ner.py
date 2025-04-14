@@ -8,7 +8,7 @@ import unittest
 
 from unittest.mock import MagicMock, patch
 
-from adsplanetnamepipe.utils.astrobert_ner import AstroBERTNER
+from adsplanetnamepipe.utils.adsabs_ner import ADSabsNER
 from adsplanetnamepipe.utils.common import EntityArgs
 
 from adsplanetnamepipe.tests.unittests.stubdata import excerpts
@@ -21,7 +21,7 @@ class TestAstroBERTNER(unittest.TestCase):
     """
 
     def setUp(self):
-        """ Set up the config class and create an instance of AstroBERTNER """
+        """ Set up the config class and create an instance of ADSabsNER """
 
         self.args = EntityArgs(
             target="Mars",
@@ -34,57 +34,57 @@ class TestAstroBERTNER(unittest.TestCase):
             timestamp='2000-01-01',
             all_targets = ["Mars", "Mercury", "Moon", "Venus"]
         )
-        self.astrobert_ner = AstroBERTNER(self.args)
+        self.adsabs_ner = ADSabsNER(self.args)
 
     def test_forward(self):
         """  """
 
         # when entity is recognized as CelestialObject
-        self.astrobert_ner.astrobert_ner = MagicMock(return_value=[
+        self.adsabs_ner.adsabs_ner = MagicMock(return_value=[
             {'entity_group': 'CelestialObject', 'score': 0.42149615, 'word': 'Rayleigh', 'start': 350, 'end': 358},
             {'entity_group': 'CelestialObject', 'score': 0.39897928, 'word': 'Drake', 'start': 449, 'end': 454},
             {'entity_group': 'Mission', 'score': 0.41518763, 'word': 'Opportunity', 'start': 501, 'end': 512}
         ])
-        self.astrobert_ner.is_citation_or_reference = MagicMock(return_value=False)
-        result = self.astrobert_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
+        self.adsabs_ner.is_citation_or_reference = MagicMock(return_value=False)
+        result = self.adsabs_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
                                             excerpts.doc_1_excerpts[3]['entity_span_within_excerpt'])
         self.assertTrue(result)
 
         # when entity is not recognized
-        self.astrobert_ner.astrobert_ner = MagicMock(return_value=[
+        self.adsabs_ner.adsabs_ner = MagicMock(return_value=[
             {'entity_group': 'CelestialObject', 'score': 0.39897928, 'word': 'Drake', 'start': 449, 'end': 454},
             {'entity_group': 'Mission', 'score': 0.41518763, 'word': 'Opportunity', 'start': 501, 'end': 512}
         ])
-        result = self.astrobert_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
+        result = self.adsabs_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
                                             excerpts.doc_1_excerpts[3]['entity_span_within_excerpt'])
         self.assertTrue(result)
 
         # when entity is recognized as other then CelestialObject
-        self.astrobert_ner.astrobert_ner = MagicMock(return_value=[
+        self.adsabs_ner.adsabs_ner = MagicMock(return_value=[
             {'entity_group': 'Model', 'score': 0.42149615, 'word': 'Rayleigh', 'start': 350, 'end': 358},
             {'entity_group': 'CelestialObject', 'score': 0.39897928, 'word': 'Drake', 'start': 449, 'end': 454},
             {'entity_group': 'Mission', 'score': 0.41518763, 'word': 'Opportunity', 'start': 501, 'end': 512}
         ])
-        result = self.astrobert_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
+        result = self.adsabs_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
                                             excerpts.doc_1_excerpts[3]['entity_span_within_excerpt'])
         self.assertFalse(result)
 
         # when entity is citation or reference
-        self.astrobert_ner.astrobert_ner = MagicMock(return_value=[
+        self.adsabs_ner.adsabs_ner = MagicMock(return_value=[
             {'entity_group': 'CelestialObject', 'score': 0.39897928, 'word': 'Drake', 'start': 449, 'end': 454},
             {'entity_group': 'Mission', 'score': 0.41518763, 'word': 'Opportunity', 'start': 501, 'end': 512}
         ])
-        self.astrobert_ner.is_citation_or_reference = MagicMock(return_value=True)
-        result = self.astrobert_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
+        self.adsabs_ner.is_citation_or_reference = MagicMock(return_value=True)
+        result = self.adsabs_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
                                             excerpts.doc_1_excerpts[3]['entity_span_within_excerpt'])
         self.assertFalse(result)
 
-    @patch('adsplanetnamepipe.utils.astrobert_ner.logger')
+    @patch('adsplanetnamepipe.utils.adsabs_ner.logger')
     def test_forward_exception(self, mock_logger):
-        """ test astrobert_ner method when raises a RuntimeError """
+        """ test adsabs_ner method when raises a RuntimeError """
 
-        self.astrobert_ner.astrobert_ner = MagicMock(side_effect=RuntimeError)
-        result = self.astrobert_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
+        self.adsabs_ner.adsabs_ner = MagicMock(side_effect=RuntimeError)
+        result = self.adsabs_ner.forward(excerpts.doc_1_excerpts[3]['excerpt'],
                                             excerpts.doc_1_excerpts[3]['entity_span_within_excerpt'])
         self.assertFalse(result)
         mock_logger.error.assert_called_once_with('AstroBERT NER throw RuntimeError.')
@@ -93,7 +93,7 @@ class TestAstroBERTNER(unittest.TestCase):
         """ test is_citation_or_reference method """
 
         # not citation or reference
-        result = self.astrobert_ner.is_citation_or_reference(excerpts.doc_1_excerpts[8]['excerpt'], excerpts.doc_1_excerpts[8]['entity_span_within_excerpt'])
+        result = self.adsabs_ner.is_citation_or_reference(excerpts.doc_1_excerpts[8]['excerpt'], excerpts.doc_1_excerpts[8]['entity_span_within_excerpt'])
         self.assertFalse(result)
 
         # citation strings
@@ -114,7 +114,7 @@ class TestAstroBERTNER(unittest.TestCase):
         entity_spans = [(82, 88), (34, 41), (32, 38), (16, 21), (13, 20), (13, 19),
                         (63, 69), (26, 32), (33, 37), (49, 54), (0, 6)]
         for excerpt, entity_span in zip(citation_excerpts, entity_spans):
-            result = self.astrobert_ner.is_citation_or_reference(excerpt, entity_span)
+            result = self.adsabs_ner.is_citation_or_reference(excerpt, entity_span)
             self.assertTrue(result)
 
         # reference strings
@@ -122,7 +122,7 @@ class TestAstroBERTNER(unittest.TestCase):
                               "Walker, S. 'In Search of the New.' Sky and Telescope, vol. 147, no. 6, 2024, p. 62."
         ]
         entity_spans = [(35, 41), (0, 6)]
-        self.astrobert_ner.args = EntityArgs(
+        self.adsabs_ner.args = EntityArgs(
             target="Moon",
             feature_type="Crater",
             feature_type_plural="Craters",
@@ -134,7 +134,7 @@ class TestAstroBERTNER(unittest.TestCase):
             all_targets = []
         )
         for excerpt, entity_span in zip(reference_excerpts, entity_spans):
-            result = self.astrobert_ner.is_citation_or_reference(excerpt, entity_span)
+            result = self.adsabs_ner.is_citation_or_reference(excerpt, entity_span)
             self.assertTrue(result)
 
 

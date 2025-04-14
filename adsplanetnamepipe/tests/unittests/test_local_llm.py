@@ -42,7 +42,7 @@ class TestLocalLLM(unittest.TestCase):
 
         mock_response = unittest.mock.Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {'text': '0.8'}
+        mock_response.json.return_value = {'response': '0.8'}
         mock_post.return_value = mock_response
 
         result = self.local_llm.forward(solrdata.doc_1['title'], solrdata.doc_1['abstract'], excerpts.doc_1_excerpts[9]['excerpt'])
@@ -54,7 +54,7 @@ class TestLocalLLM(unittest.TestCase):
 
         mock_response = unittest.mock.Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {'text': 'Invalid'}
+        mock_response.json.return_value = {'response': 'Invalid'}
         mock_post.return_value = mock_response
 
         result = self.local_llm.forward(solrdata.doc_1['title'], solrdata.doc_1['abstract'], excerpts.doc_1_excerpts[9]['excerpt'])
